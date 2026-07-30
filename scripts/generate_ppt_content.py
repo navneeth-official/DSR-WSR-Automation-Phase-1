@@ -32,6 +32,8 @@ from app.paths import (
     PPT_BUILDER,
     REPO_ROOT,
     ensure_output_dir,
+    evaluation_ai_report_paths,
+    evaluation_report_paths,
 )
 
 DEFAULT_JSON = DEFAULT_CONTENT_JSON
@@ -158,6 +160,22 @@ def main() -> None:
         action="store_true",
         help="Use legacy pixel-measurement vision loop instead of hybrid (default)",
     )
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Run format evaluation after deck build; save reports under output/",
+    )
+    parser.add_argument(
+        "--evaluate-mode",
+        choices=("full", "deterministic", "visual"),
+        default="deterministic",
+        help="Evaluation mode when --evaluate is set (default: deterministic)",
+    )
+    parser.add_argument(
+        "--evaluate-vision",
+        action="store_true",
+        help="Include AI visual review when --evaluate-mode is full",
+    )
     args = parser.parse_args()
 
     start_date = date.fromisoformat(args.start_date)
@@ -273,8 +291,6 @@ def main() -> None:
             status = "PASSED" if repair_result.passed else "INCOMPLETE"
             print(f"Auto-fix {status} — log: {repair_result.repair_log_path}")
             if repair_result.final_evaluation:
-                from app.paths import evaluation_report_paths
-
                 ev = repair_result.final_evaluation
                 eval_json_path, eval_report_path, _ = evaluation_report_paths(ppt_path)
                 eval_json_path.write_text(
@@ -294,6 +310,43 @@ def main() -> None:
                     f"({'PASS' if ev.get('deck_pass') else 'FAIL'}) -> {eval_json_path}"
                 )
                 print(f"Text report  -> {eval_report_path}")
+
+        if args.evaluate and not args.json_only:
+            from app.services.ppt_format_report import (
+                evaluate_ppt_format,
+                save_evaluation_reports,
+            )
+
+            print("\n>> Running format evaluation...")
+            include_visual = args.evaluate_mode == "full" and args.evaluate_vision
+            eval_report = evaluate_ppt_format(
+                ppt_path,
+                mode=args.evaluate_mode,
+                content_json=json_path,
+                include_visual=include_visual,
+            )
+            eval_json, eval_txt, eval_internal = evaluation_report_paths(ppt_path)
+            eval_ai_json, eval_ai_txt = evaluation_ai_report_paths(ppt_path)
+            save_evaluation_reports(
+                eval_report,
+                json_path=eval_json,
+                report_path=eval_txt,
+                internal_json_path=eval_internal,
+                ai_json_path=eval_ai_json,
+                ai_report_path=eval_ai_txt,
+            )
+            score = (
+                eval_report.final_score
+                or eval_report.deck_score
+                or eval_report.deterministic_score
+            )
+            score_text = f"{score:.1f}/100" if score is not None else "n/a"
+            print(
+                f"Evaluation: {'PASS' if eval_report.deck_pass else 'FAIL'} "
+                f"(score {score_text})"
+            )
+            print(f"  Text report -> {eval_txt}")
+            print(f"  JSON report -> {eval_json}")
 
         print(f"\nDone -> {ppt_path.resolve()}")
 
