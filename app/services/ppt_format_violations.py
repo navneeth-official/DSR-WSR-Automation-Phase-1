@@ -16,6 +16,7 @@ from app.services.ppt_layout_metrics import (
     HL_KA_TARGET_BORDER_GAP_IN,
 )
 from app.services.template_calibration import TemplateLayoutThresholds, load_thresholds
+from app.services.template_typography import TemplateTypographySpec
 
 
 def _service_base_title(title: str) -> str:
@@ -80,7 +81,10 @@ def _hl_waste_limit(
 
     Dense-fill slides (high effective utilization) use a tight band.
     Sparse HL with a Key Activities section uses the wider template band.
+    Continuation HL slides use the relaxed contd band.
     """
+    if _is_contd_hl_slide(slide):
+        return thresholds.hl_waste_contd_hl_max_in
     hl = slide.get("highlights") or {}
     if _is_hl_dense_fill(hl, thresholds):
         return thresholds.hl_waste_dense_fill_max_in
@@ -95,15 +99,20 @@ def _excessive_hl_ka_spacing(
 ) -> str | None:
     """
     HL table bottom → KA header gap (the double-arrow spacing).
-    Reference: ~0.31 in (~2 body lines). Flag only when hl_ka_gap_in exceeds max.
+
+    Sustainment decks place KA at HL_KA_TARGET_BORDER_GAP_IN (~0.472 in, two
+    body lines). Use the builder target when it exceeds the calibrated JSON band.
     """
     if slide.get("key_activities") is None:
         return None
     gap = slide.get("hl_ka_gap_in")
     if gap is None:
         return None
-    target = thresholds.hl_ka_border_gap_target_in
-    max_gap = thresholds.hl_ka_border_gap_max_in
+    target = max(thresholds.hl_ka_border_gap_target_in, HL_KA_TARGET_BORDER_GAP_IN)
+    max_gap = max(
+        thresholds.hl_ka_border_gap_max_in,
+        round(HL_KA_TARGET_BORDER_GAP_IN + 0.03, 4),
+    )
     if gap > max_gap:
         return (
             f"HL table bottom to KA header gap {gap} in exceeds template "
@@ -192,6 +201,24 @@ def compute_service_chains(slides: list[dict[str, Any]]) -> list[dict[str, Any]]
     return chains
 
 
+def terminal_slide_indices_for_chains(chains: list[dict[str, Any]]) -> frozenset[int]:
+    """Slide index where Key Activities may belong — last slide in each service chain."""
+    indices: set[int] = set()
+    for chain in chains:
+        ka_only = chain.get("ka_only_contd_slide_index")
+        if ka_only is not None:
+            indices.add(int(ka_only))
+            continue
+        contd = chain.get("contd_hl_slide_indices") or []
+        if contd:
+            indices.add(int(max(contd)))
+            continue
+        main = chain.get("main_slide_index")
+        if main is not None:
+            indices.add(int(main))
+    return frozenset(indices)
+
+
 def _ka_would_fit_below_hl(
     slide: dict[str, Any],
     thresholds: TemplateLayoutThresholds,
@@ -256,6 +283,8 @@ def detect_slide_violations(
     slide: dict[str, Any],
     *,
     thresholds: TemplateLayoutThresholds | None = None,
+    typography: TemplateTypographySpec | None = None,
+    ka_placement_terminal_indices: frozenset[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return violation dicts for one extracted slide."""
     thresholds = thresholds or load_thresholds()
@@ -283,6 +312,7 @@ def detect_slide_violations(
                 hl,
                 slide_index=idx,
                 title=title,
+                typography=typography,
             )
         )
 
@@ -394,7 +424,16 @@ def detect_slide_violations(
                 ),
             })
 
-        if hl and not ka_on_slide and _ka_would_fit_below_hl(slide, thresholds):
+        is_ka_terminal_slide = (
+            ka_placement_terminal_indices is None
+            or idx in ka_placement_terminal_indices
+        )
+        if (
+            hl
+            and not ka_on_slide
+            and is_ka_terminal_slide
+            and _ka_would_fit_below_hl(slide, thresholds)
+        ):
             hl_pos = hl.get("position_in", {})
             hl_bottom = slide.get("hl_bottom_measured_in") or hl_pos.get("bottom")
             text_bottom = slide.get("hl_text_bottom_for_fit_in") or slide.get(
@@ -454,6 +493,7 @@ def detect_deck_violations(
     content_titles: set[str] | None = None,
     scope_all_slides: bool = False,
     thresholds: TemplateLayoutThresholds | None = None,
+    typography: TemplateTypographySpec | None = None,
 ) -> dict[str, Any]:
     """Detect violations across deck using per-slide layout measurements."""
     thresholds = thresholds or load_thresholds()
@@ -467,9 +507,16 @@ def detect_deck_violations(
         slides = [s for s in slides if in_scope(s.get("title", ""))]
 
     all_violations: list[dict[str, Any]] = []
+    chains = compute_service_chains(slides)
+    ka_terminal = terminal_slide_indices_for_chains(chains)
     for slide in slides:
         all_violations.extend(
-            detect_slide_violations(slide, thresholds=thresholds)
+            detect_slide_violations(
+                slide,
+                thresholds=thresholds,
+                typography=typography,
+                ka_placement_terminal_indices=ka_terminal,
+            )
         )
 
     critical = [v for v in all_violations if v.get("severity") == "critical"]

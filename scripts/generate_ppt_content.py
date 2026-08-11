@@ -32,17 +32,41 @@ from app.paths import (
     PPT_BUILDER,
     REPO_ROOT,
     ensure_output_dir,
-    evaluation_ai_report_paths,
-    evaluation_report_paths,
 )
+from app.services.wsr_template import resolve_wsr_template
 
 DEFAULT_JSON = DEFAULT_CONTENT_JSON
 DEFAULT_PREVIEW = DEFAULT_CONTENT_PREVIEW
 DEFAULT_PPT = DEFAULT_PPT_OUTPUT
 
 
-def build_ppt_deck(content_json: Path, ppt_output: Path, layout_hints: Path | None = None) -> None:
-    """Run update_delivery_status.py with G10X layout rules."""
+def build_ppt_deck(
+    content_json: Path,
+    ppt_output: Path,
+    layout_hints: Path | None = None,
+    template: Path | str | None = None,
+    engine: str = "v1",
+) -> None:
+    """Build PowerPoint deck using v1 (legacy) or v2 (template-agnostic WSR engine)."""
+    ensure_output_dir()
+
+    if engine == "v2":
+        tpl = resolve_wsr_template(template)
+        from app.wsr_engine.main import WsrEngine
+
+        print(f"\n>> Building PowerPoint (WSR engine v2): {ppt_output}")
+        print(f"   Template: {tpl}")
+        report = WsrEngine().run(
+            template_path=tpl,
+            content_path=content_json,
+            output_path=ppt_output,
+        )
+        for line in report.summary_lines():
+            print(f"   {line}")
+        if report.errors:
+            raise RuntimeError(f"WSR engine errors: {report.errors}")
+        return
+
     if not PPT_BUILDER.is_file():
         raise FileNotFoundError(f"PPT builder not found: {PPT_BUILDER}")
     if not G10X_TEMPLATE.is_file():
@@ -59,7 +83,6 @@ def build_ppt_deck(content_json: Path, ppt_output: Path, layout_hints: Path | No
     if layout_hints and layout_hints.is_file():
         cmd.extend(["--layout-hints", str(layout_hints.resolve())])
     print(f"\n>> Building PowerPoint: {' '.join(cmd)}")
-    ensure_output_dir()
     subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
 
 
@@ -96,6 +119,19 @@ def main() -> None:
         type=str,
         default=str(DEFAULT_PPT),
         help=f"Output PowerPoint path (default: {DEFAULT_PPT.name})",
+    )
+    parser.add_argument(
+        "--template",
+        type=str,
+        default="",
+        help="WSR template .pptx (v2 engine; default: templates/wsr_template.pptx)",
+    )
+    parser.add_argument(
+        "--engine",
+        type=str,
+        choices=("v1", "v2"),
+        default="v1",
+        help="Deck builder: v1=legacy update_delivery_status.py, v2=template-agnostic engine",
     )
     parser.add_argument(
         "--save-titles",
@@ -159,22 +195,6 @@ def main() -> None:
         "--legacy-vision-measurement",
         action="store_true",
         help="Use legacy pixel-measurement vision loop instead of hybrid (default)",
-    )
-    parser.add_argument(
-        "--evaluate",
-        action="store_true",
-        help="Run format evaluation after deck build; save reports under output/",
-    )
-    parser.add_argument(
-        "--evaluate-mode",
-        choices=("full", "deterministic", "visual"),
-        default="deterministic",
-        help="Evaluation mode when --evaluate is set (default: deterministic)",
-    )
-    parser.add_argument(
-        "--evaluate-vision",
-        action="store_true",
-        help="Include AI visual review when --evaluate-mode is full",
     )
     args = parser.parse_args()
 
@@ -275,7 +295,12 @@ def main() -> None:
                 )
                 print(f"Built -> {ppt_path.resolve()}")
         else:
-            build_ppt_deck(json_path, ppt_path)
+            build_ppt_deck(
+                json_path,
+                ppt_path,
+                template=args.template.strip() or None,
+                engine=args.engine,
+            )
             print(f"\nBuilt -> {ppt_path.resolve()}")
 
         if args.auto_fix and not args.vision_validate:
@@ -291,6 +316,8 @@ def main() -> None:
             status = "PASSED" if repair_result.passed else "INCOMPLETE"
             print(f"Auto-fix {status} — log: {repair_result.repair_log_path}")
             if repair_result.final_evaluation:
+                from app.paths import evaluation_report_paths
+
                 ev = repair_result.final_evaluation
                 eval_json_path, eval_report_path, _ = evaluation_report_paths(ppt_path)
                 eval_json_path.write_text(
@@ -310,43 +337,6 @@ def main() -> None:
                     f"({'PASS' if ev.get('deck_pass') else 'FAIL'}) -> {eval_json_path}"
                 )
                 print(f"Text report  -> {eval_report_path}")
-
-        if args.evaluate and not args.json_only:
-            from app.services.ppt_format_report import (
-                evaluate_ppt_format,
-                save_evaluation_reports,
-            )
-
-            print("\n>> Running format evaluation...")
-            include_visual = args.evaluate_mode == "full" and args.evaluate_vision
-            eval_report = evaluate_ppt_format(
-                ppt_path,
-                mode=args.evaluate_mode,
-                content_json=json_path,
-                include_visual=include_visual,
-            )
-            eval_json, eval_txt, eval_internal = evaluation_report_paths(ppt_path)
-            eval_ai_json, eval_ai_txt = evaluation_ai_report_paths(ppt_path)
-            save_evaluation_reports(
-                eval_report,
-                json_path=eval_json,
-                report_path=eval_txt,
-                internal_json_path=eval_internal,
-                ai_json_path=eval_ai_json,
-                ai_report_path=eval_ai_txt,
-            )
-            score = (
-                eval_report.final_score
-                or eval_report.deck_score
-                or eval_report.deterministic_score
-            )
-            score_text = f"{score:.1f}/100" if score is not None else "n/a"
-            print(
-                f"Evaluation: {'PASS' if eval_report.deck_pass else 'FAIL'} "
-                f"(score {score_text})"
-            )
-            print(f"  Text report -> {eval_txt}")
-            print(f"  JSON report -> {eval_json}")
 
         print(f"\nDone -> {ppt_path.resolve()}")
 

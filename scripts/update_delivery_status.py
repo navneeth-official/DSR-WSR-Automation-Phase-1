@@ -610,8 +610,15 @@ def replace_bullet_block(txBody, first_index, last_index, items):
 
 
 def normalize_title_text(text):
-    """Strip zero-width spaces and non-breaking spaces for reliable title matching."""
-    return (text or "").replace("\u200b", "").replace("\xa0", " ").strip()
+    """Strip zero-width spaces and normalize Delivery status dash for matching."""
+    cleaned = (text or "").replace("\u200b", "").replace("\xa0", " ").strip()
+    return re.sub(
+        r"(Delivery status)\s+-\s+",
+        r"\1 \u2013 ",
+        cleaned,
+        count=1,
+        flags=re.I,
+    )
 
 
 def set_title_suffix(slide, suffix, ref_title_shape):

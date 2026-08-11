@@ -7,10 +7,13 @@ from pptx.oxml.ns import qn
 EMU_PER_INCH = 914400
 MIN_TEXT_KA_CLEARANCE_IN = 0.15
 HL_KA_TAB_GAP_LINES = 2  # white space between HL table bottom and KA header (user reference)
-CANONICAL_LINE_HEIGHT_EMU = 142875  # supplier sustainment story line (~0.156 in)
+CANONICAL_LINE_HEIGHT_EMU = 142875  # legacy supplier reference (~0.156 in)
+# Fixed story line height: 2 lines = 0.472 in between HL table bottom and KA tab top.
+FIXED_STORY_LINE_HEIGHT_EMU = int(0.472 * EMU_PER_INCH / HL_KA_TAB_GAP_LINES)
 HL_KA_TARGET_BORDER_GAP_IN = round(
-    HL_KA_TAB_GAP_LINES * CANONICAL_LINE_HEIGHT_EMU / EMU_PER_INCH, 4
+    HL_KA_TAB_GAP_LINES * FIXED_STORY_LINE_HEIGHT_EMU / EMU_PER_INCH, 4
 )
+HL_VISUAL_LINE_BUFFER = 1.12
 CANONICAL_PARA_SLOTS = 20
 UTILIZATION_THRESHOLD = 0.85
 SPARSE_CONTD_MAX_FILLED = 3
@@ -23,6 +26,8 @@ HL_KA_MIN_BORDER_GAP_IN = -0.15
 HL_KA_MAX_BORDER_GAP_IN = 3.0
 FOOTER_MAX_BOTTOM_IN = 6.29
 FOOTER_MAX_HL_DENSE_BOTTOM_IN = 6.55  # dense HL-only main may fill toward dotted line
+FOOTER_MAX_BOTTOM_EMU = int(FOOTER_MAX_BOTTOM_IN * EMU_PER_INCH)
+DEFAULT_KA_TABLE_HEIGHT_EMU = int(DEFAULT_EMPTY_KA_HEIGHT_IN * EMU_PER_INCH)
 CANONICAL_KA_ITEM_SLOTS = 6  # reference KA capacity for utilization
 
 _CHARS_PER_VISUAL_LINE = {0: 92, 1: 72, 7: 80}
@@ -32,8 +37,53 @@ _VISUAL_LINE_HEIGHT_BUFFER = 1.12
 
 def hl_ka_tab_gap_emu(canonical_line_height_emu: int | None = None) -> int:
     """EMU gap between Highlights table bottom and Key Activities table top."""
-    line_h = canonical_line_height_emu or CANONICAL_LINE_HEIGHT_EMU
-    return HL_KA_TAB_GAP_LINES * line_h
+    if canonical_line_height_emu is not None:
+        return HL_KA_TAB_GAP_LINES * canonical_line_height_emu
+    return HL_KA_TAB_GAP_LINES * FIXED_STORY_LINE_HEIGHT_EMU
+
+
+def apply_fixed_story_line_metrics(profile: dict) -> dict:
+    """Use one line height everywhere for HL sizing and HL→KA tab gap."""
+    merged = dict(profile)
+    merged["canonical_line_height_emu"] = FIXED_STORY_LINE_HEIGHT_EMU
+    merged["canonical_per_line_emu"] = FIXED_STORY_LINE_HEIGHT_EMU
+    return merged
+
+
+def _profile_hl_top(profile: dict) -> int:
+    hl_top = profile.get("ref_hl_top")
+    if hl_top is not None:
+        return int(hl_top)
+    ref_hl = profile.get("ref_hl")
+    if ref_hl is not None:
+        return int(ref_hl.top)
+    return 0
+
+
+def estimated_hl_table_height_emu(profile: dict, line_count: int) -> int:
+    """Minimum HL table height for a wrap-aware line count using fixed line height."""
+    r0, r1 = profile["r0"], profile["r1"]
+    content_h = int(FIXED_STORY_LINE_HEIGHT_EMU * max(line_count, 1) * HL_VISUAL_LINE_BUFFER)
+    pad = int(0.1 * EMU_PER_INCH)
+    return int(r0 + r1 + content_h + pad)
+
+
+def max_hl_height_with_ka_emu(profile: dict, ka_height_emu: int) -> int:
+    """Vertical room for HL table when KA shares the slide (footer-safe)."""
+    gap = hl_ka_tab_gap_emu()
+    return int(FOOTER_MAX_BOTTOM_EMU - ka_height_emu - gap - _profile_hl_top(profile))
+
+
+def hl_ka_fits_on_main_slide(profile: dict, line_count: int, ka_height_emu: int | None = None) -> bool:
+    """True when estimated HL height + KA + tab gap fits above the footer."""
+    ka_h = ka_height_emu or profile.get("ref_ka_height")
+    if ka_h is None:
+        ref_ka = profile.get("ref_ka")
+        if ref_ka is not None and hasattr(ref_ka, "height"):
+            ka_h = int(ref_ka.height)
+    if ka_h is None:
+        ka_h = DEFAULT_KA_TABLE_HEIGHT_EMU
+    return estimated_hl_table_height_emu(profile, line_count) <= max_hl_height_with_ka_emu(profile, int(ka_h))
 
 
 def paragraph_text(p_elem) -> str:

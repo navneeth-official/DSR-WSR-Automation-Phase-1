@@ -29,6 +29,11 @@ from app.services.ppt_layout_metrics import (
     utilization_ratio,
     count_ka_items,
 )
+from app.services.ppt_shape_utils import (
+    is_highlights_table,
+    is_ka_table,
+    iter_all_shapes,
+)
 
 EMU_PER_INCH = 914400
 
@@ -154,26 +159,16 @@ def _classify_paragraph(p: dict[str, Any]) -> str:
 
 
 def _get_highlights_shape(slide):
-    for shape in slide.shapes:
-        if not shape.has_table:
-            continue
-        try:
-            if shape.table.cell(0, 0).text.strip() == "Highlights":
-                return shape
-        except (IndexError, AttributeError):
-            continue
+    for shape in iter_all_shapes(slide.shapes):
+        if is_highlights_table(shape):
+            return shape
     return None
 
 
 def _get_ka_shape(slide):
-    for shape in slide.shapes:
-        if not shape.has_table:
-            continue
-        try:
-            if "Key activities" in shape.table.cell(0, 0).text:
-                return shape
-        except (IndexError, AttributeError):
-            continue
+    for shape in iter_all_shapes(slide.shapes):
+        if is_ka_table(shape):
+            return shape
     return None
 
 
@@ -190,7 +185,7 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
     if not title_shape:
         return None
     title = title_shape.text_frame.text.strip()
-    if "Delivery status" not in title and "Contd" not in title:
+    if not re.search(r"delivery status|\(contd", title, re.I):
         return None
 
     entry: dict[str, Any] = {
