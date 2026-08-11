@@ -612,9 +612,10 @@ def replace_bullet_block(txBody, first_index, last_index, items):
 def normalize_title_text(text):
     """Strip zero-width spaces and normalize Delivery status dash for matching."""
     cleaned = (text or "").replace("\u200b", "").replace("\xa0", " ").strip()
+    en_dash = "\u2013"
     return re.sub(
         r"(Delivery status)\s+-\s+",
-        r"\1 \u2013 ",
+        rf"\1 {en_dash} ",
         cleaned,
         count=1,
         flags=re.I,

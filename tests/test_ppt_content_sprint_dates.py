@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import date
 from types import SimpleNamespace
 
-from app.services.ppt_content_builder import build_slide_chunks
+from app.services.ppt_content_builder import (
+    build_slide_chunks,
+    group_chunks_by_slide_title,
+    key_activities_from_inprogress,
+)
 from app.services.sprint_display import sprint_dates_from_section
 
 
@@ -83,3 +87,80 @@ def test_sprint_dates_from_section_prefers_iso_over_stale_string():
         "sprint_dates": "Jun 04 – Jun 12",
     }
     assert sprint_dates_from_section(section) == "Jun 04 – Jun 17"
+
+
+def test_key_activities_from_inprogress_dedupes_across_sections():
+    sections = [
+        {
+            "inprogress": [
+                "Story A",
+                "Story B",
+            ],
+        },
+        {
+            "inprogress": [
+                "Story B",
+                "Story C",
+            ],
+        },
+    ]
+    assert key_activities_from_inprogress(sections) == [
+        "Story A",
+        "Story B",
+        "Story C",
+    ]
+
+
+def test_key_activities_from_inprogress_empty_when_no_stories():
+    assert key_activities_from_inprogress([]) == []
+    assert key_activities_from_inprogress([{"inprogress": []}]) == []
+
+
+def test_build_slide_chunks_populates_key_activities_from_inprogress():
+    story = _story(
+        jira_key="COST-99",
+        sprint_name="Q3.01 FY26 Atlas",
+        sprint_start=date(2026, 6, 4),
+        sprint_end=date(2026, 6, 17),
+    )
+    story.status = "In Progress"
+    story.title = "Implement COGS adjustment API"
+
+    chunk = build_slide_chunks([story])[0]
+    assert chunk["inprogress"] == ["Implement COGS adjustment API"]
+    assert chunk["key_activities"] == ["Implement COGS adjustment API"]
+
+
+def test_group_chunks_by_slide_title_merges_key_activities():
+    chunks = [
+        {
+            "project_key": "SUP",
+            "project_name": "Supplier QA",
+            "title": "Supplier Core Service",
+            "sprint_name": "Sprint A",
+            "sprint_start_date": "2026-06-01",
+            "sprint_end_date": "2026-06-15",
+            "sprint_dates": "Jun 01 – Jun 15",
+            "sprint_status": "In-progress",
+            "released": [],
+            "inprogress": ["Story A"],
+            "completed": [],
+            "key_activities": ["Story A"],
+        },
+        {
+            "project_key": "SUP",
+            "project_name": "Supplier QA",
+            "title": "Supplier Core Service",
+            "sprint_name": "Sprint B",
+            "sprint_start_date": "2026-06-16",
+            "sprint_end_date": "2026-06-30",
+            "sprint_dates": "Jun 16 – Jun 30",
+            "sprint_status": "In-progress",
+            "released": [],
+            "inprogress": ["Story B", "Story A"],
+            "completed": [],
+            "key_activities": ["Story B", "Story A"],
+        },
+    ]
+    merged = group_chunks_by_slide_title(chunks)[0]
+    assert merged["key_activities"] == ["Story A", "Story B"]

@@ -34,6 +34,20 @@ def _bucket_story(status: str) -> str:
     return STATUS_TO_BUCKET.get(status.strip().lower(), "completed")
 
 
+def key_activities_from_inprogress(sections: list[dict[str, Any]]) -> list[str]:
+    """Mirror HL 'Stories in-progress this week' bullets in the KA tab."""
+    items: list[str] = []
+    seen: set[str] = set()
+    for section in sections:
+        for story in section.get("inprogress") or []:
+            text = str(story).strip()
+            key = text.lower()
+            if text and key not in seen:
+                seen.add(key)
+                items.append(text)
+    return items
+
+
 def _slide_order_key(project_key: str) -> tuple[int, str]:
     try:
         return (PPT_SLIDE_ORDER.index(project_key), project_key)
@@ -82,20 +96,23 @@ def build_slide_chunks(
         sprint_dates = format_sprint_dates_for_display(sprint_start, sprint_end)
         status_word = _sprint_status_label(sprint.sprint_status if sprint else None)
 
+        section_payload = {
+            "sprint_name": sprint_name,
+            "sprint_start_date": sprint_start.isoformat() if sprint_start else None,
+            "sprint_end_date": sprint_end.isoformat() if sprint_end else None,
+            "sprint_dates": sprint_dates,
+            "sprint_status": status_word,
+            "released": released,
+            "inprogress": inprogress,
+            "completed": completed,
+        }
         chunks.append(
             {
                 "project_key": project_key,
                 "project_name": project_name,
                 "title": ppt_slide_title(project_key, project_name),
-                "sprint_name": sprint_name,
-                "sprint_start_date": sprint_start.isoformat() if sprint_start else None,
-                "sprint_end_date": sprint_end.isoformat() if sprint_end else None,
-                "sprint_dates": sprint_dates,
-                "sprint_status": status_word,
-                "released": released,
-                "inprogress": inprogress,
-                "completed": completed,
-                "key_activities": [],
+                "key_activities": key_activities_from_inprogress([section_payload]),
+                **section_payload,
             }
         )
 
@@ -134,10 +151,15 @@ def group_chunks_by_slide_title(chunks: list[dict[str, Any]]) -> list[dict[str, 
                 "project_name": chunk["project_name"],
                 "title": title,
                 "sections": [],
-                "key_activities": chunk.get("key_activities", []),
+                "key_activities": [],
             }
             order.append(title)
         by_title[title]["sections"].append(section)
+
+    for title in order:
+        by_title[title]["key_activities"] = key_activities_from_inprogress(
+            by_title[title]["sections"]
+        )
 
     return [by_title[t] for t in order]
 
