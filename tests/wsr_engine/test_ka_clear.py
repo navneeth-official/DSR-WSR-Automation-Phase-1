@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 from pptx import Presentation
 
+from app.constants.ppt_bullets import KA_BULLET_CHAR
+from app.services.ppt_ka_bullets import ka_bullet_char
 from app.services.ppt_shape_utils import get_key_activities_shape
-from app.wsr_engine.formatter import clear_ka_on_slide, set_ka_empty_items
+from app.wsr_engine.formatter import clear_ka_on_slide, set_ka_empty_items, set_ka_items
 
 HASKELL = (
     Path(__file__).resolve().parents[2]
@@ -40,6 +42,24 @@ def test_set_ka_empty_items_uses_placeholders():
     paras = ka.table.cell(1, 0).text_frame.paragraphs
     assert len(paras) >= 1
     assert not any(p.text.strip() for p in paras)
+
+
+@pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")
+def test_set_ka_items_uses_round_bullet_not_dash():
+    prs = Presentation(str(HASKELL))
+    ka = get_key_activities_shape(prs.slides[7])
+    set_ka_items(ka, ["First key activity", "Second key activity"])
+    tx_body = ka.table.cell(1, 0).text_frame._txBody
+    from pptx.oxml.ns import qn
+
+    from app.services.ppt_shape_utils import paragraph_text
+
+    filled = [p for p in tx_body.findall(qn("a:p")) if paragraph_text(p).strip()]
+    assert len(filled) == 2
+    for p in filled:
+        assert ka_bullet_char(p) == KA_BULLET_CHAR
+        p_pr = p.find(qn("a:pPr"))
+        assert p_pr is not None and p_pr.get("lvl") == "0"
 
 
 @pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")

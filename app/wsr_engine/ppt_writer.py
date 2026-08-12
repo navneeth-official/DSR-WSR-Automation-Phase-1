@@ -200,6 +200,9 @@ class PptWriter:
             layout_profile=layout_profile,
             ka_on_main=overflow.ka_on_main,
             ka_contd_only=overflow.ka_contd_only,
+            key_activities=content.key_activities,
+            project_name=project_map.project_name,
+            title_format=self.template_model.title_format,
         )
 
     def update_index(self, projects: list[ProjectMap]) -> int:

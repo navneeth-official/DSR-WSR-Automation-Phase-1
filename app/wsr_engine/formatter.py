@@ -22,6 +22,7 @@ from app.services.ppt_shape_utils import (
 from app.services.template_profile import ParagraphRoles, ServiceProfile, TemplateProfile
 from app.wsr_engine.content_parser import section_display_content
 from app.wsr_engine.models import SprintSection
+from app.services.ppt_ka_bullets import replace_ka_bullet_block
 from app.wsr_engine.placeholder_locator import highlights_content_cell
 
 STORY_BUCKET_ORDER = ("completed", "released", "inprogress")
@@ -644,7 +645,76 @@ def set_ka_empty_items(ka_shape, placeholder_rows: int | None = None) -> None:
     all_p = tx_body.findall(qn("a:p"))
     if not all_p:
         return
-    replace_bullet_block(tx_body, 0, len(all_p) - 1, items)
+    replace_ka_bullet_block(tx_body, 0, len(all_p) - 1, items)
+
+
+def resolve_ka_items(key_activities: list[str]) -> list[str]:
+    """Return KA bullets; empty content -> placeholder rows for manual entry."""
+    items = [str(item).strip() for item in key_activities if str(item).strip()]
+    if items:
+        return items
+    from app.constants.ppt_mapping import KA_PLACEHOLDER_ROWS
+
+    return [""] * max(KA_PLACEHOLDER_ROWS, 1)
+
+
+def set_ka_items(ka_shape, items: list[str]) -> None:
+    tx_body = ka_shape.table.cell(1, 0).text_frame._txBody
+    all_p = tx_body.findall(qn("a:p"))
+    if not all_p:
+        return
+    replace_ka_bullet_block(tx_body, 0, len(all_p) - 1, items)
+
+
+def populate_embedded_ka_in_hl(
+    slide,
+    items: list[str],
+    ka_header_row: int | None = None,
+) -> None:
+    """Fill embedded KA rows inside a combined Highlights table."""
+    hl = get_highlights_shape(slide)
+    table = hl.table
+    if ka_header_row is None:
+        for ri in range(len(table.rows)):
+            try:
+                label = table.cell(ri, 0).text.strip().lower()
+            except (IndexError, AttributeError):
+                continue
+            if "key activit" in label:
+                ka_header_row = ri
+                break
+    if ka_header_row is None:
+        return
+
+    content_start = ka_header_row + 1
+    if content_start >= len(table.rows):
+        return
+
+    cell = table.cell(content_start, 0)
+    tx_body = cell.text_frame._txBody
+    all_p = tx_body.findall(qn("a:p"))
+    if all_p:
+        replace_ka_bullet_block(tx_body, 0, len(all_p) - 1, items)
+    elif items:
+        cell.text = items[0]
+
+    for ri in range(content_start + 1, len(table.rows)):
+        table.cell(ri, 0).text = ""
+
+
+def populate_ka_on_slide(
+    slide,
+    key_activities: list[str],
+    service: ServiceProfile | None = None,
+) -> None:
+    """Write KA bullets on standalone or embedded layouts."""
+    items = resolve_ka_items(key_activities)
+    ka = get_key_activities_shape(slide)
+    if ka is not None:
+        set_ka_items(ka, items)
+        return
+    if service is not None and service.ka_mode == "embedded":
+        populate_embedded_ka_in_hl(slide, items, service.ka_embedded_start_row)
 
 
 def clear_embedded_ka_in_hl(slide) -> None:

@@ -12,6 +12,10 @@ CATEGORY_HEADER_BULLET_COLOR = "000000"
 # Preview label for text output (visual stand-in for the Wingdings arrowhead)
 CATEGORY_HEADER_PREVIEW_SYMBOL = "\u25ba"  # ►
 
+# Key Activities list items — round bullet at outline level 0 (all G10X templates)
+KA_BULLET_CHAR = "\u2022"  # •
+KA_BULLET_LEVEL = 0
+
 # Must NEVER be used for category headers
 FORBIDDEN_CATEGORY_HEADER_BULLETS: tuple[str, ...] = (
     "\u2022",  # • round (sprint lines)

@@ -2928,11 +2928,13 @@ def move_slide_after(prs, slide_index, after_index):
 
 
 def set_ka_items(ka_shape, items):
+    from app.services.ppt_ka_bullets import replace_ka_bullet_block
+
     txBody = ka_shape.table.cell(1, 0).text_frame._txBody
     all_p = txBody.findall(qn("a:p"))
     if all_p and items:
         last = min(2, len(all_p) - 1)
-        replace_bullet_block(txBody, 0, last, items)
+        replace_ka_bullet_block(txBody, 0, last, items)
 
 
 def ka_would_overflow(slide):

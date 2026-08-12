@@ -11,15 +11,18 @@ from app.services.ppt_layout_metrics import (
     EMU_PER_INCH,
     FIXED_STORY_LINE_HEIGHT_EMU,
     FOOTER_MAX_BOTTOM_EMU,
+    MIN_TEXT_KA_CLEARANCE_IN,
     apply_fixed_story_line_metrics,
     count_hl_paragraphs,
     count_visual_lines_in_hl,
     estimated_text_bottom_emu,
     hl_ka_tab_gap_emu,
+    rendered_text_bottom_emu,
 )
-from app.services.ppt_shape_utils import get_highlights_shape, get_key_activities_shape
+from app.services.ppt_shape_utils import get_highlights_shape, get_key_activities_shape, slide_title_text
 from app.services.template_profile import ServiceProfile, TemplateProfile
 from app.wsr_engine.hl_ka_normalizer import find_standalone_reference_slide
+from app.wsr_engine.models import TitleFormat
 from app.wsr_engine.overflow_engine import build_layout_profile
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,26 @@ _VISUAL_LINE_BUFFER = 1.12
 
 def _canonical_per_line(profile: dict) -> int:
     return int(profile.get("canonical_per_line_emu") or FIXED_STORY_LINE_HEIGHT_EMU)
+
+
+def _rendered_text_kw(profile: dict) -> dict:
+    return {
+        "ref_para_count": profile.get("canonical_para_count", profile["ref_para_count"]),
+        "ref_r2": profile["ref_r2"],
+        "per_line_emu": _canonical_per_line(profile),
+    }
+
+
+def rendered_hl_text_bottom(hl_shape, profile: dict) -> int:
+    """Wrap-aware HL text end — never underestimate vs table row height."""
+    return rendered_text_bottom_emu(hl_shape, **_rendered_text_kw(profile))
+
+
+def hl_content_needs_ka_contd(hl_shape, profile: dict, ka_height_emu: int) -> bool:
+    """True when rendered HL text + KA + tab gap cannot fit above the footer."""
+    gap = hl_ka_tab_gap_emu(profile.get("canonical_line_height_emu"))
+    text_bottom = rendered_hl_text_bottom(hl_shape, profile)
+    return text_bottom + gap + ka_height_emu > MAX_KA_BOTTOM_EMU
 
 
 def _set_table_shape_height(hl_shape, row_heights: list[int], target_h: int) -> None:
@@ -62,11 +85,14 @@ def fit_hl_to_content(hl_shape, profile: dict, max_h: int | None = None) -> int:
     ref_para_count = profile.get("canonical_para_count", profile["ref_para_count"])
     per_line = _canonical_per_line(profile)
 
-    text_bottom = estimated_text_bottom_emu(
-        hl_shape,
-        ref_para_count=ref_para_count,
-        ref_r2=ref_r2,
-        per_line_emu=per_line,
+    text_bottom = max(
+        estimated_text_bottom_emu(
+            hl_shape,
+            ref_para_count=ref_para_count,
+            ref_r2=ref_r2,
+            per_line_emu=per_line,
+        ),
+        rendered_text_bottom_emu(hl_shape, **_rendered_text_kw(profile)),
     )
     min_h = _min_hl_height_for_content(hl_shape, profile)
     target_h = max(int(text_bottom - hl_shape.top + HL_CONTENT_BOTTOM_PAD_EMU), min_h)
@@ -80,12 +106,12 @@ def fit_hl_to_content(hl_shape, profile: dict, max_h: int | None = None) -> int:
     return target_h
 
 
-def hl_content_needs_ka_contd(hl_shape, profile: dict, ka_height_emu: int) -> bool:
-    """True when HL content height cannot share the slide with KA above the footer."""
-    needed = _min_hl_height_for_content(hl_shape, profile)
+def hl_table_needs_ka_contd(hl_shape, profile: dict, ka_height_emu: int) -> bool:
+    """True when minimum HL table height cannot share the slide with KA."""
     gap = hl_ka_tab_gap_emu()
+    min_h = _min_hl_height_for_content(hl_shape, profile)
     allowed = int(MAX_KA_BOTTOM_EMU - ka_height_emu - gap - hl_shape.top)
-    return needed > allowed
+    return min_h > allowed
 
 
 def hl_text_bottom_emu(hl_shape, profile: dict) -> int:
@@ -99,9 +125,10 @@ def hl_text_bottom_emu(hl_shape, profile: dict) -> int:
 
 
 def effective_ka_top(hl_shape, profile: dict, ka_height: int) -> int:
-    """KA top = HL table bottom + fixed tab gap (~2 story lines), footer-clamped."""
+    """KA top = rendered HL text bottom + tab gap, footer-clamped."""
     gap = hl_ka_tab_gap_emu(profile.get("canonical_line_height_emu"))
-    tab_top = int(hl_shape.top + hl_shape.height + gap)
+    text_bottom = rendered_hl_text_bottom(hl_shape, profile)
+    tab_top = int(text_bottom + gap)
     max_top = MAX_KA_BOTTOM_EMU - ka_height
     return min(tab_top, max_top)
 
@@ -119,7 +146,7 @@ def ka_overlaps_footer(slide, max_bottom_emu: int = MAX_KA_BOTTOM_EMU) -> bool:
 
 
 def ka_overlaps_hl_text(slide, profile: dict) -> bool:
-    """True when KA sits above the standard HL-table tab gap."""
+    """True when KA sits above rendered HL text + standard tab gap."""
     ka = get_key_activities_shape(slide)
     if ka is None:
         return False
@@ -128,8 +155,8 @@ def ka_overlaps_hl_text(slide, profile: dict) -> bool:
     except ValueError:
         return False
     gap = hl_ka_tab_gap_emu(profile.get("canonical_line_height_emu"))
-    tab_top = int(hl.top + hl.height + gap)
-    return ka.top < tab_top
+    min_ka_top = rendered_hl_text_bottom(hl, profile) + gap
+    return ka.top < min_ka_top
 
 
 def _merge_slide_geometry(layout_profile: dict, slide_profile: dict) -> dict:
@@ -148,7 +175,10 @@ def fit_main_slide_hl_ka(
     layout_profile: dict | None = None,
 ) -> bool:
     """
-    Shrink HL to wrap-aware content height; place KA a fixed tab gap below HL table.
+    Size HL to content and place KA below rendered HL text + tab gap.
+
+    Returns False when HL and KA cannot share the slide (caller should split KA
+    to a dedicated continuation slide).
     """
     ka = get_key_activities_shape(slide)
     if ka is None:
@@ -176,16 +206,25 @@ def fit_main_slide_hl_ka(
     gap = hl_ka_tab_gap_emu()
     max_hl_h = int(MAX_KA_BOTTOM_EMU - ka_h - gap - hl.top)
 
+    if hl_table_needs_ka_contd(hl, layout_profile, ka_h):
+        return False
+
     fit_hl_to_content(hl, layout_profile, max_h=max_hl_h)
 
-    # Re-apply KA position after HL resize (table bottom may have moved).
+    if hl_content_needs_ka_contd(hl, layout_profile, ka_h):
+        return False
+
     ka.left = ref_ka.left
     ka.width = ref_ka.width
     ka.height = ka_h
     ka.top = effective_ka_top(hl, layout_profile, ka_h)
 
+    clearance_in = (ka.top - rendered_hl_text_bottom(hl, layout_profile)) / EMU_PER_INCH
+    if clearance_in + 1e-6 < MIN_TEXT_KA_CLEARANCE_IN:
+        logger.warning("KA clearance below minimum after fit (%.3f in)", clearance_in)
+        return False
     if ka_overlaps_hl_text(slide, layout_profile):
-        logger.warning("KA above HL tab gap after fit — layout may need contd slide")
+        logger.warning("KA overlaps rendered HL text after fit")
         return False
     if ka_overlaps_footer(slide):
         logger.warning("KA overlaps footer after fit")
@@ -242,7 +281,7 @@ def ensure_key_activities_on_main_slide(
     service: ServiceProfile,
     profile: TemplateProfile,
 ):
-    """Clone empty KA when missing; always fit HL+KA geometry on main slides."""
+    """Clone empty KA when missing; fit HL+KA geometry on main slides."""
     if service.ka_mode == "embedded":
         return get_key_activities_shape(slide)
 
@@ -250,8 +289,100 @@ def ensure_key_activities_on_main_slide(
     if ka is None:
         return None
 
+    from app.wsr_engine.formatter import populate_ka_on_slide
+
+    populate_ka_on_slide(slide, [], service)
     fit_main_slide_hl_ka(slide, template_prs, profile)
     return ka
+
+
+def _slide_fit_profile(slide, base_profile: dict) -> dict:
+    slide_profile = build_layout_profile(slide)
+    merged = apply_fixed_story_line_metrics(
+        _merge_slide_geometry(dict(base_profile), slide_profile)
+    )
+    merged.setdefault("canonical_para_count", merged["ref_para_count"])
+    return merged
+
+
+def _split_ka_to_contd_slide(
+    prs: Presentation,
+    template_prs: Presentation,
+    *,
+    project_name: str,
+    main_idx: int,
+    hl_slide_idx: int,
+    service: ServiceProfile,
+    title_format: TitleFormat,
+    ka_items: list[str],
+    fit_profile: dict,
+) -> int:
+    """Move KA off ``hl_slide_idx`` onto a new KA-only continuation slide."""
+    from app.wsr_engine.continuation_engine import append_ka_only_contd_slide
+    from app.wsr_engine.formatter import populate_ka_on_slide, remove_ka_from_slide
+
+    hl_slide = prs.slides[hl_slide_idx]
+    remove_ka_from_slide(hl_slide)
+    fit_hl_only_on_slide(hl_slide, fit_profile)
+
+    ka_idx = append_ka_only_contd_slide(
+        prs,
+        template_prs,
+        project_name,
+        main_idx,
+        hl_slide_idx,
+        service,
+        title_format,
+    )
+    populate_ka_on_slide(prs.slides[ka_idx], ka_items, service)
+    return ka_idx
+
+
+def _apply_hl_ka_or_split(
+    prs: Presentation,
+    template_prs: Presentation,
+    *,
+    slide_idx: int,
+    main_idx: int,
+    project_name: str,
+    service: ServiceProfile,
+    profile: TemplateProfile,
+    title_format: TitleFormat | None,
+    ka_items: list[str],
+    fit_profile: dict,
+) -> None:
+    """Populate KA on ``slide_idx`` and fit HL+KA, splitting to KA contd when needed."""
+    from app.wsr_engine.formatter import populate_ka_on_slide, remove_ka_from_slide
+
+    slide = prs.slides[slide_idx]
+    remove_ka_from_slide(slide)
+    ensure_key_activities_on_slide(slide, template_prs, profile)
+    populate_ka_on_slide(slide, ka_items, service)
+
+    slide_fit = _slide_fit_profile(slide, fit_profile)
+    if fit_main_slide_hl_ka(slide, template_prs, profile, layout_profile=slide_fit):
+        return
+
+    if title_format is None or not project_name:
+        logger.warning("HL+KA overflow on slide %s but no title_format — leaving cramped layout", slide_idx)
+        return
+
+    logger.info(
+        "HL+KA overflow on %s slide %s — moving Key Activities to dedicated (Contd..) slide",
+        project_name,
+        slide_idx + 1,
+    )
+    _split_ka_to_contd_slide(
+        prs,
+        template_prs,
+        project_name=project_name,
+        main_idx=main_idx,
+        hl_slide_idx=slide_idx,
+        service=service,
+        title_format=title_format,
+        ka_items=ka_items,
+        fit_profile=fit_profile,
+    )
 
 
 def finalize_project_hl_ka(
@@ -264,14 +395,24 @@ def finalize_project_hl_ka(
     layout_profile: dict | None = None,
     ka_on_main: bool = False,
     ka_contd_only: bool = False,
+    key_activities: list[str] | None = None,
+    project_name: str = "",
+    title_format: TitleFormat | None = None,
 ) -> None:
     """
     Place Key Activities only on the last slide of a project; tighten HL on every slide.
 
     When overflow continues on (Contd..) slides, earlier slides use HL-only layout
-    (full vertical budget). The final slide holds HL + empty KA placeholders.
+    (full vertical budget). The final slide holds HL + KA when they fit; otherwise
+    KA moves to an additional KA-only (Contd..) slide.
     """
-    from app.wsr_engine.formatter import clear_ka_on_slide, remove_ka_from_slide
+    from app.wsr_engine.formatter import populate_ka_on_slide, remove_ka_from_slide
+
+    ka_items = list(key_activities or [])
+    if title_format is None:
+        title_format = TitleFormat(
+            prefix="Delivery Status", separator=" - ", contd_marker="(Contd..)"
+        )
 
     template_slide = template_prs.slides[service.main_slide_index]
     fit_profile = apply_fixed_story_line_metrics(
@@ -282,13 +423,22 @@ def finalize_project_hl_ka(
     if service.ka_mode == "embedded":
         for idx in contd_indices:
             fit_hl_only_on_slide(prs.slides[idx], fit_profile)
+        populate_ka_on_slide(prs.slides[main_idx], ka_items, service)
         return
 
     if ka_on_main:
-        main_slide = prs.slides[main_idx]
-        ensure_key_activities_on_slide(main_slide, template_prs, profile)
-        fit_main_slide_hl_ka(main_slide, template_prs, profile, layout_profile=fit_profile)
-        clear_ka_on_slide(main_slide, template_slide, service)
+        _apply_hl_ka_or_split(
+            prs,
+            template_prs,
+            slide_idx=main_idx,
+            main_idx=main_idx,
+            project_name=project_name,
+            service=service,
+            profile=profile,
+            title_format=title_format,
+            ka_items=ka_items,
+            fit_profile=fit_profile,
+        )
         return
 
     if ka_contd_only:
@@ -296,7 +446,7 @@ def finalize_project_hl_ka(
         remove_ka_from_slide(main_slide)
         fit_hl_only_on_slide(main_slide, fit_profile)
         if contd_indices:
-            clear_ka_on_slide(prs.slides[contd_indices[-1]], template_slide, service)
+            populate_ka_on_slide(prs.slides[contd_indices[-1]], ka_items, service)
         return
 
     last_idx = contd_indices[-1] if contd_indices else main_idx
@@ -307,8 +457,23 @@ def finalize_project_hl_ka(
         remove_ka_from_slide(slide)
         fit_hl_only_on_slide(slide, fit_profile)
 
-    last_slide = prs.slides[last_idx]
-    remove_ka_from_slide(last_slide)
-    ensure_key_activities_on_slide(last_slide, template_prs, profile)
-    fit_main_slide_hl_ka(last_slide, template_prs, profile, layout_profile=fit_profile)
-    clear_ka_on_slide(last_slide, template_slide, service)
+    pname = project_name
+    if not pname:
+        raw = slide_title_text(prs.slides[main_idx])
+        if "-" in raw:
+            pname = raw.split("-", 1)[-1].strip()
+            if "(contd" in pname.lower():
+                pname = pname[: pname.lower().index("(contd")].strip()
+
+    _apply_hl_ka_or_split(
+        prs,
+        template_prs,
+        slide_idx=last_idx,
+        main_idx=main_idx,
+        project_name=pname,
+        service=service,
+        profile=profile,
+        title_format=title_format,
+        ka_items=ka_items,
+        fit_profile=fit_profile,
+    )

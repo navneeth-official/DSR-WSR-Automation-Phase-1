@@ -33,7 +33,12 @@ def set_contd_title(slide, project_name: str, ref_title_shape, title_format: Tit
     prefix = title_format.prefix
     sep = title_format.separator
 
-    title_shape = find_title_shape(slide)
+    try:
+        title_shape = find_title_shape(slide)
+    except RuntimeError:
+        new_el = copy.deepcopy(ref_title_shape.element)
+        slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
+        title_shape = find_title_shape(slide)
 
     ref_rPr = None
     if ref_title_shape.has_text_frame and ref_title_shape.text_frame.paragraphs:
@@ -249,3 +254,27 @@ def ensure_ka_only_contd_slide(
             delete_slide(prs, idx)
 
     return [slide_idx], created
+
+
+def append_ka_only_contd_slide(
+    prs: Presentation,
+    template_prs: Presentation,
+    project_name: str,
+    main_idx: int,
+    after_idx: int,
+    service: ServiceProfile,
+    title_format: TitleFormat,
+) -> int:
+    """Insert a KA-only (Contd..) slide immediately after ``after_idx``."""
+    template_slide = template_prs.slides[service.main_slide_index]
+    ka_contd_template_idx = _resolve_ka_only_contd_template(template_prs, service.main_slide_index)
+    slide_idx = create_contd_slide_after(
+        prs, template_prs, after_idx, ka_contd_template_idx
+    )
+    contd_slide = prs.slides[slide_idx]
+    main_slide = prs.slides[main_idx]
+    ref_title = find_title_shape(main_slide)
+    set_contd_title(contd_slide, project_name, ref_title, title_format)
+    remove_hl_from_slide(contd_slide)
+    position_ka_at_contd_top(contd_slide, template_prs, layout_ref_slide=template_slide)
+    return slide_idx
