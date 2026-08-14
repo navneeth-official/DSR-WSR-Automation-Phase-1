@@ -8,6 +8,7 @@ import logging
 from pptx import Presentation
 from pptx.oxml.ns import qn
 
+from app.services.ppt_logo_sync import sync_heb_logo_from_main
 from app.services.ppt_shape_utils import find_title_shape, normalize_title_text, slide_title_text
 from app.services.template_profile import ServiceProfile
 from app.wsr_engine.formatter import (
@@ -159,6 +160,7 @@ def ensure_continuation_slides(
 
         fill_contd_highlights_on_slide(contd_slide, section_tmpl, continuation_chains[chain_idx])
         remove_ka_from_slide(contd_slide)
+        sync_heb_logo_from_main(main_slide, contd_slide)
 
         contd_indices.append(slide_idx)
         insert_after = slide_idx
@@ -247,6 +249,7 @@ def ensure_ka_only_contd_slide(
     remove_hl_from_slide(contd_slide)
     position_ka_at_contd_top(contd_slide, template_prs, layout_ref_slide=template_slide)
     clear_ka_on_slide(contd_slide, template_slide, service)
+    sync_heb_logo_from_main(main_slide, contd_slide)
 
     keep = {slide_idx}
     for idx in sorted(find_contd_slides_for_project(prs, project_name), reverse=True):
@@ -277,4 +280,5 @@ def append_ka_only_contd_slide(
     set_contd_title(contd_slide, project_name, ref_title, title_format)
     remove_hl_from_slide(contd_slide)
     position_ka_at_contd_top(contd_slide, template_prs, layout_ref_slide=template_slide)
+    sync_heb_logo_from_main(main_slide, contd_slide)
     return slide_idx

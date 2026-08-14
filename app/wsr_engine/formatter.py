@@ -22,6 +22,12 @@ from app.services.ppt_shape_utils import (
 from app.services.template_profile import ParagraphRoles, ServiceProfile, TemplateProfile
 from app.wsr_engine.content_parser import section_display_content
 from app.wsr_engine.models import SprintSection
+from app.services.ppt_hl_bullets import (
+    clear_story_line_text,
+    is_text_prefix_story_bullet,
+    set_single_run_text,
+    set_story_line_text,
+)
 from app.services.ppt_ka_bullets import replace_ka_bullet_block
 from app.wsr_engine.placeholder_locator import highlights_content_cell
 
@@ -86,6 +92,8 @@ def _is_story_bullet(p_elem) -> bool:
         return False
     p_pr = p_elem.find(qn("a:pPr"))
     if p_pr is not None and p_pr.find(qn("a:buChar")) is not None:
+        return True
+    if is_text_prefix_story_bullet(p_elem):
         return True
     return text.startswith(STORY_BULLET_CHAR) or text.startswith("-") or text.startswith("\u2013")
 
@@ -228,7 +236,7 @@ def get_canonical_style_cell(template_prs, profile: TemplateProfile | None = Non
 
 
 def discover_section_templates(canonical_cell, global_completed=None) -> dict[str, Any]:
-    """Cost Core paragraph styles: lvl 0 sprint, lvl 7 category headers, lvl 1 dash stories."""
+    """Clone sprint / category / story paragraph styles from the active template as-is."""
     paras = canonical_cell.text_frame._txBody.findall(qn("a:p"))
     story_bullet = _find_canonical_story_bullet(paras)
 
@@ -291,12 +299,7 @@ def discover_section_templates(canonical_cell, global_completed=None) -> dict[st
 
     result: dict[str, Any] = {}
     for key, val in required.items():
-        cloned = copy.deepcopy(val)
-        if key.endswith("_hdr"):
-            _ensure_category_header_bullet(cloned)
-        elif key.endswith("_bullet"):
-            _normalize_story_bullet_template(cloned)
-        result[key] = cloned
+        result[key] = copy.deepcopy(val)
     return result
 
 
@@ -319,27 +322,19 @@ def section_templates_from_profile(layout_slide, service: ServiceProfile) -> dic
 
     def hdr(key: str) -> Any:
         idx = getattr(roles, f"{key}_hdr")
-        elem = copy.deepcopy(_pick_para(paras, idx, roles.completed_hdr or 2))
-        _ensure_category_header_bullet(elem)
-        return elem
+        return copy.deepcopy(_pick_para(paras, idx, roles.completed_hdr or 2))
 
     def bullet(key: str) -> Any:
         idx = getattr(roles, f"{key}_bullet")
         hdr_idx = getattr(roles, f"{key}_hdr")
         story = _story_after_header(paras, hdr_idx)
         if story is not None:
-            cloned = copy.deepcopy(story)
-            _normalize_story_bullet_template(cloned)
-            return cloned
+            return copy.deepcopy(story)
         if idx is not None and 0 <= idx < len(paras):
             candidate = paras[idx]
             if _is_story_bullet(candidate):
-                cloned = copy.deepcopy(candidate)
-                _normalize_story_bullet_template(cloned)
-                return cloned
-        cloned = copy.deepcopy(story_para)
-        _normalize_story_bullet_template(cloned)
-        return cloned
+                return copy.deepcopy(candidate)
+        return copy.deepcopy(story_para)
 
     return {
         "sprint": copy.deepcopy(_pick_para(paras, roles.sprint, 0)),
@@ -351,15 +346,6 @@ def section_templates_from_profile(layout_slide, service: ServiceProfile) -> dic
         "inprogress_hdr": hdr("inprogress"),
         "inprogress_bullet": bullet("inprogress"),
     }
-
-
-def set_single_run_text(p_elem, text: str) -> None:
-    runs = p_elem.findall(qn("a:r"))
-    if not runs:
-        return
-    runs[0].find(qn("a:t")).text = text
-    for extra in runs[1:]:
-        p_elem.remove(extra)
 
 
 def set_two_run_header(p_elem, prefix: str, count_suffix: str) -> None:
@@ -375,8 +361,7 @@ def set_two_run_header(p_elem, prefix: str, count_suffix: str) -> None:
 
 def _cleared_story_bullet_template(section_tmpl: dict, bucket: str):
     bullet = copy.deepcopy(section_tmpl[f"{bucket}_bullet"])
-    set_single_run_text(bullet, "")
-    _normalize_story_bullet_template(bullet)
+    clear_story_line_text(bullet)
     return bullet
 
 
@@ -407,8 +392,7 @@ def replace_bullet_block(txBody, first_index: int, last_index: int, items: list[
     new_paragraphs = []
     for text in items:
         new_p = copy.deepcopy(template_p)
-        set_single_run_text(new_p, text)
-        _normalize_story_bullet_template(new_p)
+        set_story_line_text(new_p, text)
         new_paragraphs.append(new_p)
 
     prev = anchor
@@ -484,7 +468,6 @@ def _fill_story_buckets(hl_txBody, offset: int, section, omit=(), display: bool 
                 set_two_run_header(hdr_p, "Stories released for partner review ", f"{count} stories")
             else:
                 set_single_run_text(hdr_p, f"Stories in-progress this week \u2013 {count} stories")
-            _ensure_category_header_bullet(hdr_p)
         offset = _advance_offset_after_bullets(
             hl_txBody, offset, items, has_category_header=has_header
         )

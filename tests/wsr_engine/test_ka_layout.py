@@ -16,6 +16,7 @@ from app.wsr_engine.ka_layout import (
     effective_ka_top,
     ensure_key_activities_on_main_slide,
     finalize_project_hl_ka,
+    fit_hl_only_on_slide,
     ka_overlaps_footer,
     ka_overlaps_hl_text,
     rendered_hl_text_bottom,
@@ -225,3 +226,41 @@ def test_supplier_dense_overflow_splits_ka_to_dedicated_contd(tmp_path):
         fit_layout = apply_fixed_story_line_metrics(build_layout_profile(slide))
         if get_key_activities_shape(slide) is not None:
             assert not ka_overlaps_hl_text(slide, fit_layout)
+
+
+HL_CONTD_TEMPLATE_INDEX = 4
+
+
+@pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")
+def test_sparse_hl_contd_shrinks_to_content():
+    """Sparse HL-only contd: table height follows line count, not template row-2 slack."""
+    from app.services.ppt_layout_metrics import EMU_PER_INCH
+    from app.wsr_engine.formatter import discover_section_templates, get_canonical_style_cell
+
+    prs = Presentation(str(HASKELL))
+    profile = scan_template_profile(HASKELL)
+    contd_slide = prs.slides[HL_CONTD_TEMPLATE_INDEX]
+    hl = get_highlights_shape(contd_slide)
+    template_h_in = hl.height / EMU_PER_INCH
+    assert template_h_in > 4.0, "contd template should start with tall HL row"
+
+    tmpl = discover_section_templates(get_canonical_style_cell(prs, profile))
+    sparse_sections = [
+        {"title": "Story A", "inprogress": [], "completed": [], "planned": []},
+        {"title": "Story B", "inprogress": [], "completed": [], "planned": []},
+        {"title": "Story C", "inprogress": [], "completed": [], "planned": []},
+        {"title": "Story D", "inprogress": [], "completed": [], "planned": []},
+    ]
+    from app.wsr_engine.formatter import fill_highlights_on_slide
+
+    fill_highlights_on_slide(contd_slide, tmpl, sparse_sections)
+
+    main_slide = prs.slides[profile.services["Cost Core Service"].main_slide_index]
+    fit_profile = apply_fixed_story_line_metrics(build_layout_profile(main_slide))
+    fit_hl_only_on_slide(contd_slide, fit_profile)
+
+    fitted_h_in = hl.height / EMU_PER_INCH
+    assert fitted_h_in < template_h_in - 2.0, (
+        f"sparse contd HL should shrink well below template, got {fitted_h_in:.2f}in"
+    )
+    assert fitted_h_in < 3.0, f"sparse 4-line contd HL should be ~2–3in, got {fitted_h_in:.2f}in"

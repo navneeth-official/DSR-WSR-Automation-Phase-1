@@ -20,21 +20,28 @@ from app.wsr_engine.formatter import (
     discover_section_templates,
     fill_highlights_on_slide,
     get_canonical_style_cell,
+    section_templates_from_profile,
 )
 from app.wsr_engine.hl_ka_normalizer import (
     find_hl_only_contd_template_index,
     normalize_deck_hl_ka_layouts,
 )
 
-HASKELL = (
+HASKELL_JULY = (
+    Path(__file__).resolve().parents[2]
+    / "templates"
+    / "G10X H-E-B WSR Haskell Location Pharmacy GSS PAM 11 July 2025.pptx"
+)
+HASKELL_AUG = (
     Path(__file__).resolve().parents[2]
     / "templates"
     / "G10X H-E-B WSR Haskell Location Pharmacy GSS PAM 01 Aug 2025.pptx"
 )
+HASKELL = HASKELL_JULY
 
 
 @pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")
-def test_discover_section_templates_uses_lvl1_story_bullets():
+def test_discover_section_templates_preserves_template_story_bullets():
     prs = Presentation(str(HASKELL))
     profile = scan_template_profile(HASKELL)
     cell = get_canonical_style_cell(prs, profile)
@@ -42,8 +49,27 @@ def test_discover_section_templates_uses_lvl1_story_bullets():
     bullet = tmpl["completed_bullet"]
     p_pr = bullet.find(qn("a:pPr"))
     assert p_pr is not None
+    assert p_pr.get("lvl") == "2"
+    bu = p_pr.find(qn("a:buChar"))
+    assert bu is not None
+    assert bu.get("char") == "\uf0a7"
+    buf = p_pr.find(qn("a:buFont"))
+    assert buf is not None and "Wingdings" in buf.get("typeface", "")
+
+
+@pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")
+def test_discover_section_templates_preserves_category_header_bullets():
+    prs = Presentation(str(HASKELL))
+    profile = scan_template_profile(HASKELL)
+    cell = get_canonical_style_cell(prs, profile)
+    tmpl = discover_section_templates(cell)
+    hdr = tmpl["completed_hdr"]
+    p_pr = hdr.find(qn("a:pPr"))
+    assert p_pr is not None
     assert p_pr.get("lvl") == "1"
-    assert p_pr.find(qn("a:buChar")) is not None
+    bu = p_pr.find(qn("a:buChar"))
+    assert bu is not None
+    assert bu.get("char") == "o"
 
 
 @pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")
@@ -79,12 +105,52 @@ def test_fill_highlights_applies_story_bullets():
             story_found = True
             p_pr = p.find(qn("a:pPr"))
             assert p_pr is not None and p_pr.find(qn("a:buChar")) is not None
-            assert p_pr.get("lvl") == "1"
+            assert p_pr.get("lvl") == "2"
+            bu = p_pr.find(qn("a:buChar"))
+            assert bu.get("char") == "\uf0a7"
             runs = p.findall(qn("a:r"))
             assert not any(
                 r.find(qn("a:rPr")) is not None and r.find(qn("a:rPr")).get("b") == "1"
                 for r in runs
             )
+    assert story_found
+
+
+@pytest.mark.skipif(not HASKELL_AUG.is_file(), reason="Aug Haskell template missing")
+def test_fill_supplier_preserves_text_prefix_dash_bullet():
+    """Aug template stores story dash as a text run (₋\\t), not buChar."""
+    prs = Presentation(str(HASKELL_AUG))
+    profile = scan_template_profile(HASKELL_AUG)
+    svc = profile.services["Supplier Core Service"]
+    slide = prs.slides[svc.main_slide_index]
+    section_tmpl = section_templates_from_profile(slide, svc)
+
+    fill_highlights_on_slide(
+        slide,
+        section_tmpl,
+        [
+            {
+                "sprint_bold": "Sprint – Test ",
+                "sprint_light": "(Jun 01 – Jun 15) Stories",
+                "completed_items": [],
+                "completed_count": "0",
+                "released_items": [],
+                "released_count": "0",
+                "inprogress_items": ["Validate supplier onboarding workflow"],
+                "inprogress_count": "1",
+            }
+        ],
+    )
+
+    hl = get_highlights_shape(slide)
+    story_found = False
+    for p in hl.table.cell(2, 0).text_frame._txBody.findall(qn("a:p")):
+        txt = paragraph_text(p).strip()
+        if txt.endswith("Validate supplier onboarding workflow"):
+            story_found = True
+            assert txt.startswith("\u208b"), f"expected text-prefix dash bullet, got {txt[:10]!r}"
+            p_pr = p.find(qn("a:pPr"))
+            assert p_pr is None or p_pr.find(qn("a:buChar")) is None
     assert story_found
 
 

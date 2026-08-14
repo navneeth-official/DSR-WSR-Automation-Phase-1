@@ -76,24 +76,17 @@ def _min_hl_height_for_content(hl_shape, profile: dict) -> int:
 
 def fit_hl_to_content(hl_shape, profile: dict, max_h: int | None = None) -> int:
     """
-    Resize Highlights table to rendered text (+ small pad), never larger than required.
+    Resize Highlights table to wrap-aware text (+ small pad), never larger than required.
+
+    Uses line-based text bottom only — not physical row-2 height from cloned contd
+    templates, which would leave sparse HL boxes oversized.
 
     Returns the applied table height in EMU.
     """
     r0, r1 = profile["r0"], profile["r1"]
-    ref_r2 = profile["ref_r2"]
-    ref_para_count = profile.get("canonical_para_count", profile["ref_para_count"])
     per_line = _canonical_per_line(profile)
 
-    text_bottom = max(
-        estimated_text_bottom_emu(
-            hl_shape,
-            ref_para_count=ref_para_count,
-            ref_r2=ref_r2,
-            per_line_emu=per_line,
-        ),
-        rendered_text_bottom_emu(hl_shape, **_rendered_text_kw(profile)),
-    )
+    text_bottom = hl_text_bottom_emu(hl_shape, profile)
     min_h = _min_hl_height_for_content(hl_shape, profile)
     target_h = max(int(text_bottom - hl_shape.top + HL_CONTENT_BOTTOM_PAD_EMU), min_h)
     if max_h is not None:
@@ -238,9 +231,13 @@ def fit_hl_only_on_slide(slide, layout_profile: dict | None = None) -> int:
         hl = get_highlights_shape(slide)
     except ValueError:
         return 0
+    slide_profile = build_layout_profile(slide)
     if layout_profile is None:
-        layout_profile = build_layout_profile(slide)
+        layout_profile = slide_profile
+    else:
+        layout_profile = _merge_slide_geometry(dict(layout_profile), slide_profile)
     layout_profile = apply_fixed_story_line_metrics(layout_profile)
+    layout_profile.setdefault("canonical_para_count", layout_profile["ref_para_count"])
     max_h = int(MAX_KA_BOTTOM_EMU - layout_profile["ref_hl"].top - MIN_HL_BOTTOM_PAD_EMU)
     height = fit_hl_to_content(hl, layout_profile, max_h=max_h)
     from app.wsr_engine.formatter import top_align_highlights_on_slide

@@ -29,7 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from app.services.sprint_display import sprint_dates_from_section
-from app.services.ppt_layout_metrics import hl_ka_tab_gap_emu, rendered_text_bottom_emu
+from app.services.ppt_logo_sync import sync_heb_logo_from_main
 
 G10X = str(_REPO_ROOT / "templates" / "G10X H-E-B WSR Sustainment 05 June 2026 .pptx")
 OUTPUT = str(_REPO_ROOT / "output" / "HEB_Delivery_Status.pptx")
@@ -596,7 +596,7 @@ def replace_bullet_block(txBody, first_index, last_index, items):
     new_paragraphs = []
     for text in items:
         new_p = copy.deepcopy(template_p)
-        set_single_run_text(new_p, text)
+        set_story_line_text(new_p, text)
         _apply_g10x_paragraph_spacing(new_p, is_story=True)
         new_paragraphs.append(new_p)
 
@@ -2151,7 +2151,6 @@ def _fill_story_buckets(hl_txBody, offset, section, omit=(), display=False):
                     hdr_p,
                     f"Stories in-progress this week \u2013 {count} stories",
                 )
-            _ensure_category_header_bullet(hdr_p)
         offset = _advance_offset_after_bullets(
             hl_txBody, offset, items, has_category_header=has_header
         )
@@ -2327,10 +2326,7 @@ def discover_section_templates(canonical_cell, global_completed=None):
                 required[key] = story_bullet
     if any(v is None for v in required.values()):
         raise RuntimeError("Could not resolve highlights section templates from G10X")
-    for key, val in required.items():
-        if key.endswith("_hdr"):
-            _ensure_category_header_bullet(val)
-    return required
+    return {key: copy.deepcopy(val) for key, val in required.items()}
 
 
 def populate_highlights_cell(hl_cell, section_tmpl, content):
@@ -2696,31 +2692,6 @@ def find_contd_slides_for_service(prs, title_fragment):
         if search in title and "(contd" in title:
             out.append(i)
     return out
-
-
-def sync_heb_logo_from_main(main_slide, contd_slide) -> bool:
-    """
-    Copy the H-E-B header logo onto a (Contd…) slide.
-
-    Deep-copying shape XML breaks embedded image relationships; re-insert from bytes.
-    """
-    src = next(
-        (s for s in main_slide.shapes if getattr(s, "shape_id", None) == 3),
-        None,
-    )
-    if src is None:
-        return False
-    try:
-        blob = src.image.blob
-    except (AttributeError, ValueError):
-        return False
-    for sh in list(contd_slide.shapes):
-        if getattr(sh, "shape_id", None) == 3:
-            delete_shape(sh)
-    contd_slide.shapes.add_picture(
-        io.BytesIO(blob), src.left, src.top, width=src.width, height=src.height
-    )
-    return True
 
 
 def _create_contd_slide_after(prs, g10x_prs, after_idx, template_index):
