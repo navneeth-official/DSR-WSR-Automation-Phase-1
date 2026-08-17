@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import shutil
 from datetime import date
 from pathlib import Path
@@ -19,7 +18,7 @@ from app.wsr_engine.formatter import (
 )
 from app.wsr_engine.hl_ka_normalizer import normalize_deck_hl_ka_layouts
 from app.wsr_engine.ka_layout import finalize_project_hl_ka
-from app.wsr_engine.index_updater import reflow_index_slide
+from app.wsr_engine.index_updater import rebuild_index_from_projects, reflow_index_slide
 from app.wsr_engine.models import BuildReport, ProjectContent, ProjectMap, TemplateModel
 from app.wsr_engine.overflow_engine import (
     build_overflow_profile,
@@ -34,55 +33,7 @@ from app.wsr_engine.slide_ops import save_presentation_clean
 
 logger = logging.getLogger(__name__)
 
-_ENGLISH_MONTHS = (
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-)
-_ENGLISH_MONTHS_UPPER = tuple(m.upper() for m in _ENGLISH_MONTHS)
-_TITLE_DATE_RE = re.compile(r"^\d{1,2}\s+\w+\s+\d{4}$", re.IGNORECASE)
-_UPPER_DATE_RE = re.compile(r"^\d{1,2}\s+[A-Z]{3}\s+\d{4}$")
-
-
-def detect_cover_date_format(cover_slide) -> str:
-    """Return 'title' for '05 June 2026' or 'upper' for '01 AUG 2025'."""
-    for shape in cover_slide.shapes:
-        if not shape.has_text_frame:
-            continue
-        text = shape.text_frame.text.strip()
-        if not text or text.lower() == "weekly status report":
-            continue
-        if _UPPER_DATE_RE.match(text):
-            return "upper"
-        if _TITLE_DATE_RE.match(text):
-            return "title"
-    return "title"
-
-
-def format_wsr_cover_date(wsr_start: date, fmt: str = "title") -> str:
-    if fmt == "upper":
-        return f"{wsr_start.day:02d} {_ENGLISH_MONTHS_UPPER[wsr_start.month - 1]} {wsr_start.year}"
-    return f"{wsr_start.day:02d} {_ENGLISH_MONTHS[wsr_start.month - 1]} {wsr_start.year}"
-
-
-def sync_cover_slide_wsr_date(prs: Presentation, wsr_start: date | str) -> bool:
-    if isinstance(wsr_start, str):
-        wsr_start = date.fromisoformat(wsr_start)
-    cover = prs.slides[0]
-    fmt = detect_cover_date_format(cover)
-    formatted = format_wsr_cover_date(wsr_start, fmt)
-
-    for shape in cover.shapes:
-        if not shape.has_text_frame:
-            continue
-        text = shape.text_frame.text.strip()
-        if not text or text.lower() == "weekly status report":
-            continue
-        if _TITLE_DATE_RE.match(text) or _UPPER_DATE_RE.match(text) or (
-            "date" in shape.name.lower() and "weekly" not in text.lower()
-        ):
-            shape.text_frame.text = formatted
-            return True
-    return False
+from app.services.ppt_cover_date import sync_cover_slide_wsr_date
 
 
 class PptWriter:
@@ -203,8 +154,21 @@ class PptWriter:
             title_format=self.template_model.title_format,
         )
 
-    def update_index(self, projects: list[ProjectMap]) -> int:
+    def update_index(
+        self,
+        projects: list[ProjectMap],
+        *,
+        skeleton_mode: bool = False,
+        content_labels: dict[str, str] | None = None,
+    ) -> int:
         assert self.prs is not None
+        if skeleton_mode:
+            return rebuild_index_from_projects(
+                self.prs,
+                projects,
+                content_labels,
+                self.template_model.index_layout,
+            )
         return reflow_index_slide(self.prs, projects)
 
     def save(self, output_path: Path | str) -> Path:

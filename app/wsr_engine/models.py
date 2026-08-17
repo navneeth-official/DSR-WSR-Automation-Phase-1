@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from app.wsr_engine.index_layout import IndexLayout
+
 SlideType = Literal[
     "PROJECT_MAIN",
     "PROJECT_KA",
@@ -110,6 +112,7 @@ class TemplateModel:
     index_slide_index: int | None = None
     title_format: TitleFormat | None = None
     profile: Any = None
+    index_layout: IndexLayout | None = None
 
     def project_by_name(self, name: str) -> ProjectMap | None:
         needle = name.strip().lower()

@@ -61,7 +61,11 @@ def classify_slide(slide: Slide, index: int) -> SlideDescriptor:
     if index == 0 or "weekly status report" in norm:
         return SlideDescriptor(index=index, title=title, slide_type="COVER")
 
-    if norm == "index" or _looks_like_index_slide(slide):
+    if norm == "index" or (
+        _looks_like_index_slide(slide)
+        and "team allocation" not in norm
+        and "matters of attention" not in norm
+    ):
         return SlideDescriptor(index=index, title=title or "Index", slide_type="INDEX")
 
     has_hl = _slide_has_highlights(slide)

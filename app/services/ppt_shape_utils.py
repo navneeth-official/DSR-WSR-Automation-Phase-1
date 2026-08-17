@@ -84,6 +84,11 @@ def is_highlights_table(shape) -> bool:
     return "highlights" in header and rows >= 3 and cols >= 3
 
 
+def has_highlights_table(slide) -> bool:
+    """True when the slide contains a Highlights table (not bare title match)."""
+    return any(is_highlights_table(shape) for shape in iter_all_shapes(slide.shapes))
+
+
 def is_ka_table(shape) -> bool:
     if not shape.has_table:
         return False

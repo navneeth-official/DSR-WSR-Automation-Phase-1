@@ -76,7 +76,7 @@ def _resolve_hl_only_contd_template(
     service: ServiceProfile,
     fallback_idx: int,
 ) -> int:
-    """Prefer an HL-only contd template over service-specific contd with KA."""
+    """Prefer an HL-only contd template; fall back to the project main slide."""
     global_idx = find_hl_only_contd_template_index(template_prs)
     if global_idx is not None:
         return global_idx
@@ -93,6 +93,11 @@ def _resolve_hl_only_contd_template(
                 return idx
             except ValueError:
                 continue
+
+    logger.debug(
+        "No HL-only contd template; using main slide %d as contd source",
+        fallback_idx,
+    )
     return fallback_idx
 
 
@@ -177,9 +182,15 @@ def _resolve_ka_only_contd_template(
     template_prs: Presentation,
     fallback_idx: int,
 ) -> int:
-    """Prefer a KA-only (Contd..) template so KA sits at the top content row."""
+    """Prefer a KA-only contd template; fall back to the project main slide."""
     idx = find_ka_only_contd_template_index(template_prs)
-    return idx if idx is not None else fallback_idx
+    if idx is not None:
+        return idx
+    logger.debug(
+        "No KA-only contd template; using main slide %d as contd source",
+        fallback_idx,
+    )
+    return fallback_idx
 
 
 def position_ka_at_contd_top(

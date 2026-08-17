@@ -14,6 +14,7 @@ from pptx.oxml.ns import qn
 from app.services.ppt_shape_utils import (
     get_highlights_shape,
     get_key_activities_shape,
+    has_highlights_table,
     is_contd_title,
     is_delivery_slide_title,
     normalize_title_text,
@@ -21,6 +22,7 @@ from app.services.ppt_shape_utils import (
     service_suffix_from_title,
     slide_title_text,
 )
+from app.wsr_engine.template_mode import is_placeholder_name
 
 CATEGORY_PATTERNS: dict[str, tuple[str, ...]] = {
     "completed": ("completed this week",),
@@ -192,7 +194,7 @@ def scan_template_profile(template_path: Path | str) -> TemplateProfile:
         suffix = service_suffix_from_title(title)
         if is_contd_title(title):
             contds.setdefault(suffix, []).append(idx)
-        else:
+        elif has_highlights_table(slide):
             mains[suffix] = idx
 
     for suffix, main_idx in mains.items():
@@ -212,6 +214,51 @@ def scan_template_profile(template_path: Path | str) -> TemplateProfile:
         )
 
     return profile
+
+
+def clone_prototype_service_profile(
+    profile: TemplateProfile,
+    prototype_name: str,
+    project_maps: list[ProjectMap],
+) -> TemplateProfile:
+    """Copy the prototype service scan onto every provisioned project slide."""
+    proto = profile.services.get(prototype_name)
+    if proto is None:
+        proto = profile.service_for_title(prototype_name)
+    if proto is None and profile.services:
+        proto = next(iter(profile.services.values()))
+    if proto is None:
+        return profile
+
+    updated = TemplateProfile(template_file=profile.template_file, services=dict(profile.services))
+    for proj in project_maps:
+        cloned = ServiceProfile(
+            service_title=proj.project_name,
+            main_slide_index=proto.main_slide_index,
+            contd_slide_indices=list(proto.contd_slide_indices),
+            hl_content_row=proto.hl_content_row,
+            hl_content_col=proto.hl_content_col,
+            paragraph_roles=ParagraphRoles(
+                sprint=proto.paragraph_roles.sprint,
+                current_week=proto.paragraph_roles.current_week,
+                completed_hdr=proto.paragraph_roles.completed_hdr,
+                completed_bullet=proto.paragraph_roles.completed_bullet,
+                released_hdr=proto.paragraph_roles.released_hdr,
+                released_bullet=proto.paragraph_roles.released_bullet,
+                inprogress_hdr=proto.paragraph_roles.inprogress_hdr,
+                inprogress_bullet=proto.paragraph_roles.inprogress_bullet,
+                sprint_gap=proto.paragraph_roles.sprint_gap,
+            ),
+            ka_mode=proto.ka_mode,
+            ka_embedded_start_row=proto.ka_embedded_start_row,
+            hl_row_count=proto.hl_row_count,
+        )
+        updated.services[proj.project_name] = cloned
+
+    if is_placeholder_name(prototype_name):
+        updated.services.pop(prototype_name, None)
+
+    return updated
 
 
 def save_template_profile(profile: TemplateProfile, path: Path) -> Path:

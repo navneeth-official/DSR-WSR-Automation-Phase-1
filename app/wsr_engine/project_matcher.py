@@ -95,3 +95,55 @@ def match_projects(
         )
 
     return matched
+
+
+def match_content_driven(
+    project_maps: list[ProjectMap],
+    content_projects: list[ProjectContent],
+    aliases: dict[str, str] | None = None,
+    threshold: int = MATCH_THRESHOLD,
+) -> dict[str, ProjectContent]:
+    """Map provisioned slide names to content chunks (skeleton template mode)."""
+    aliases = dict(aliases or {})
+    matched: dict[str, ProjectContent] = {}
+    used_content: set[str] = set()
+
+    for proj_map in project_maps:
+        slide_name = proj_map.project_name
+        candidates: list[tuple[int, ProjectContent, str]] = []
+
+        for proj in content_projects:
+            if proj.title in used_content:
+                continue
+            for label in (proj.title, proj.project_name):
+                if not label:
+                    continue
+                score = _score_match(label, slide_name)
+                if score >= threshold:
+                    candidates.append((score, proj, label))
+
+        alias_target = aliases.get(slide_name)
+        if alias_target:
+            for proj in content_projects:
+                if proj.title in used_content:
+                    continue
+                if proj.title == alias_target or proj.project_name == alias_target:
+                    candidates.append((100, proj, alias_target))
+
+        if not candidates:
+            logger.warning("No content match for provisioned slide: %s", slide_name)
+            continue
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_proj, label = candidates[0]
+        matched[slide_name] = best_proj
+        used_content.add(best_proj.title)
+        logger.info(
+            "Matched provisioned '%s' -> '%s' (score=%d via %s)",
+            slide_name,
+            best_proj.title,
+            best_score,
+            label,
+        )
+
+    return matched

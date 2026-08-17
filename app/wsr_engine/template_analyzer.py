@@ -8,6 +8,8 @@ from pathlib import Path
 from pptx import Presentation
 
 from app.services.template_profile import scan_template_profile
+from app.wsr_engine.index_layout import discover_index_layout
+from app.wsr_engine.index_updater import _find_index_table
 from app.wsr_engine.models import TemplateModel
 from app.wsr_engine.project_detector import (
     build_project_maps,
@@ -30,6 +32,12 @@ def analyze_template(template_path: Path | str) -> TemplateModel:
     title_format = detect_title_format(slides)
     profile = scan_template_profile(path)
 
+    index_layout = None
+    if index_idx is not None:
+        table = _find_index_table(prs.slides[index_idx])
+        if table is not None:
+            index_layout = discover_index_layout(table)
+
     model = TemplateModel(
         template_path=str(path),
         slides=slides,
@@ -37,6 +45,7 @@ def analyze_template(template_path: Path | str) -> TemplateModel:
         index_slide_index=index_idx,
         title_format=title_format,
         profile=profile,
+        index_layout=index_layout,
     )
 
     logger.info(

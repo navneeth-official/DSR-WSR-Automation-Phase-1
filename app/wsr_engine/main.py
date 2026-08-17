@@ -5,22 +5,31 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 
+from app.services.ppt_cover_date import (
+    find_cover_date_shape,
+    format_cover_date,
+    sync_cover_slide_wsr_date,
+)
+from app.services.template_profile import clone_prototype_service_profile
 from app.wsr_engine.content_parser import load_content
-from app.wsr_engine.models import BuildReport
+from app.wsr_engine.models import BuildReport, TitleFormat
+from app.wsr_engine.ppt_writer import PptWriter
 from app.wsr_engine.project_deletion import (
     delete_unmatched_projects,
     refresh_project_maps_after_deletion,
 )
-from app.wsr_engine.project_matcher import load_aliases, match_projects
-from app.wsr_engine.ppt_writer import PptWriter, sync_cover_slide_wsr_date
+from app.wsr_engine.project_matcher import load_aliases, match_content_driven, match_projects
 from app.wsr_engine.slide_order import (
     cleanup_orphan_contd_slides,
     delete_unmatched_delivery_slides,
     finalize_slide_order,
 )
+from app.wsr_engine.slide_provisioner import provision_project_slides
 from app.wsr_engine.template_analyzer import analyze_template
+from app.wsr_engine.template_mode import is_skeleton_template
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +47,7 @@ class WsrEngine:
         template = analyze_template(template_path)
         content = load_content(content_path)
         aliases = load_aliases(aliases_path)
-
-        report.detected_projects = len(template.projects)
-        matched = match_projects(template, content.projects, aliases)
-        report.matched_projects = len(matched)
-        matched_names = set(matched.keys())
+        skeleton_mode = is_skeleton_template(template)
 
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -50,17 +55,55 @@ class WsrEngine:
         writer = PptWriter(template_path, working_path=out)
         writer.prepare(template)
 
-        deleted = delete_unmatched_projects(writer.prs, template, matched_names)
-        deleted += delete_unmatched_delivery_slides(writer.prs, matched_names)
-        unmatched_count = len(template.projects) - len(matched_names)
-        report.deleted_projects = unmatched_count
-        if deleted:
-            logger.info("Deleted %d slide(s) for unmatched projects", deleted)
+        if skeleton_mode:
+            title_format = template.title_format or TitleFormat(
+                prefix="Delivery status",
+                separator=" \u2013 ",
+                contd_marker="(Contd...)",
+            )
+            prototype = template.projects[0]
+            projects = provision_project_slides(
+                writer.prs,
+                prototype.main_slide_index,
+                content.projects,
+                title_format,
+                aliases,
+            )
+            template.projects = projects
+            template.profile = clone_prototype_service_profile(
+                template.profile,
+                prototype.project_name,
+                projects,
+            )
+            writer.template_model = template
 
-        remaining_names = [
-            p.project_name for p in template.projects if p.project_name in matched_names
-        ]
-        projects = refresh_project_maps_after_deletion(writer.prs, remaining_names)
+            matched = match_content_driven(projects, content.projects, aliases)
+            matched_names = set(matched.keys())
+            report.detected_projects = len(projects)
+            report.matched_projects = len(matched)
+            report.deleted_projects = 0
+            remaining_names = [p.project_name for p in projects if p.project_name in matched_names]
+            projects = [p for p in projects if p.project_name in matched_names]
+        else:
+            matched = match_projects(template, content.projects, aliases)
+            matched_names = set(matched.keys())
+            report.detected_projects = len(template.projects)
+            report.matched_projects = len(matched)
+
+            deleted = delete_unmatched_projects(writer.prs, template, matched_names)
+            deleted += delete_unmatched_delivery_slides(writer.prs, matched_names)
+            report.deleted_projects = len(template.projects) - len(matched_names)
+            if deleted:
+                logger.info("Deleted %d slide(s) for unmatched projects", deleted)
+
+            remaining_names = [
+                p.project_name for p in template.projects if p.project_name in matched_names
+            ]
+            projects = refresh_project_maps_after_deletion(writer.prs, remaining_names)
+
+        content_labels = {
+            name: matched[name].title for name in matched if name in matched_names
+        }
 
         for proj in projects:
             content_proj = matched.get(proj.project_name)
@@ -76,18 +119,30 @@ class WsrEngine:
 
         finalize_slide_order(writer.prs, remaining_names)
         cleanup_orphan_contd_slides(writer.prs)
-        delete_unmatched_delivery_slides(writer.prs, matched_names)
+        if not skeleton_mode:
+            delete_unmatched_delivery_slides(writer.prs, matched_names)
 
         projects = refresh_project_maps_after_deletion(writer.prs, remaining_names)
-        report.index_entries_updated = writer.update_index(projects)
+        report.index_entries_updated = writer.update_index(
+            projects,
+            skeleton_mode=skeleton_mode,
+            content_labels=content_labels,
+        )
 
-        if content.report_start_date:
-            sync_cover_slide_wsr_date(writer.prs, content.report_start_date)
+        if content.report_end_date:
+            end = date.fromisoformat(content.report_end_date)
+            if sync_cover_slide_wsr_date(writer.prs, end):
+                _, profile = find_cover_date_shape(writer.prs.slides[0])
+                shown = format_cover_date(end, profile) if profile else end.isoformat()
+                logger.info("Updated cover slide date -> %s", shown)
+            else:
+                logger.warning("Cover slide date placeholder not found")
 
         from app.wsr_engine.slide_ops import normalize_slide_partnames
 
         normalize_slide_partnames(writer.prs)
-        delete_unmatched_delivery_slides(writer.prs, matched_names)
+        if not skeleton_mode:
+            delete_unmatched_delivery_slides(writer.prs, matched_names)
 
         saved = writer.save(out)
         report.output_path = str(saved)

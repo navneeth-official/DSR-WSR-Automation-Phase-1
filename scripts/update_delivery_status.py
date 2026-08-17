@@ -29,6 +29,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from app.services.sprint_display import sprint_dates_from_section
+from app.services.ppt_cover_date import format_wsr_cover_date, sync_cover_slide_wsr_date
 from app.services.ppt_logo_sync import sync_heb_logo_from_main
 
 G10X = str(_REPO_ROOT / "templates" / "G10X H-E-B WSR Sustainment 05 June 2026 .pptx")
@@ -357,52 +358,6 @@ def load_slides_from_json(path):
     return slides
 
 
-_ENGLISH_MONTHS = (
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-)
-_COVER_DATE_TEXT_RE = re.compile(r"^\d{1,2}\s+\w+\s+\d{4}$")
-
-
-def format_wsr_cover_date(wsr_start: date) -> str:
-    """G10X cover slide format, e.g. ``05 June 2026``."""
-    return f"{wsr_start.day:02d} {_ENGLISH_MONTHS[wsr_start.month - 1]} {wsr_start.year}"
-
-
-def sync_cover_slide_wsr_date(prs, wsr_start: date | str) -> bool:
-    """
-    Set slide-1 WSR date from ``report_start_date`` (G10X ``Date Placeholder``).
-
-    Leaves the ``Weekly status report`` label unchanged; updates only the date line.
-    """
-    if isinstance(wsr_start, str):
-        wsr_start = date.fromisoformat(wsr_start)
-    formatted = format_wsr_cover_date(wsr_start)
-    cover = prs.slides[0]
-    for shape in cover.shapes:
-        if not shape.has_text_frame:
-            continue
-        text = shape.text_frame.text.strip()
-        if not text or text.lower() == "weekly status report":
-            continue
-        if _COVER_DATE_TEXT_RE.match(text) or (
-            "date" in shape.name.lower() and "weekly" not in text.lower()
-        ):
-            shape.text_frame.text = formatted
-            return True
-    return False
-
-
 def resolve_ka_items(raw):
     """Return KA bullet list; empty DB content → one placeholder row for manual entry."""
     items = raw.get("key_activities") or []
@@ -479,9 +434,9 @@ def parse_args():
         help="Path to layout hints JSON (pack_all_sections_on_main per service)",
     )
     parser.add_argument(
-        "--wsr-start-date",
+        "--wsr-end-date",
         default="",
-        help="WSR start date for cover slide (YYYY-MM-DD). Default: report_start_date from --content JSON",
+        help="Cover slide date (YYYY-MM-DD). Default: report_end_date from --content JSON",
     )
     return parser.parse_args()
 
@@ -3345,13 +3300,13 @@ def main():
 
     slides_data = SLIDES
     using_json = False
-    wsr_start_date = args.wsr_start_date.strip() or None
+    wsr_end_date = args.wsr_end_date.strip() or None
     if args.content and Path(args.content).is_file():
         with open(args.content, encoding="utf-8") as f:
             content_payload = json.load(f)
         slides_data = load_slides_from_json(args.content)
-        if not wsr_start_date:
-            wsr_start_date = content_payload.get("report_start_date")
+        if not wsr_end_date:
+            wsr_end_date = content_payload.get("report_end_date")
         using_json = True
         print(f"Loaded {len(slides_data)} slide(s) from {args.content}")
 
@@ -3531,11 +3486,11 @@ def main():
             f"{'y' if index_updates == 1 else 'ies'} (removed projects without content)"
         )
 
-    if wsr_start_date:
-        if sync_cover_slide_wsr_date(prs, wsr_start_date):
+    if wsr_end_date:
+        if sync_cover_slide_wsr_date(prs, wsr_end_date):
             print(
                 f"Updated cover slide WSR date -> "
-                f"{format_wsr_cover_date(date.fromisoformat(wsr_start_date))}"
+                f"{format_wsr_cover_date(date.fromisoformat(wsr_end_date))}"
             )
         else:
             print("Warning: cover slide date placeholder not found")

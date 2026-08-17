@@ -124,13 +124,16 @@ def main() -> None:
         "--template",
         type=str,
         default="",
-        help="WSR template .pptx (v2 engine; default: templates/wsr_template.pptx)",
+        help=(
+            "WSR template .pptx (v2 engine). Default: templates/wsr_template.pptx, "
+            "else the newest .pptx in templates/"
+        ),
     )
     parser.add_argument(
         "--engine",
         type=str,
         choices=("v1", "v2"),
-        default="v1",
+        default="v2",
         help="Deck builder: v1=legacy update_delivery_status.py, v2=template-agnostic engine",
     )
     parser.add_argument(
