@@ -8,6 +8,7 @@ import logging
 from pptx import Presentation
 from pptx.oxml.ns import qn
 
+from app.services.ppt_logo_sync import sync_header_pictures_from_reference
 from app.services.ppt_shape_utils import find_title_shape
 from app.wsr_engine.models import ProjectContent, ProjectMap, TitleFormat
 from app.wsr_engine.slide_ops import clear_slide_shapes, copy_shapes_to_slide, move_slide_after
@@ -90,6 +91,7 @@ def provision_project_slides(
             slide = prs.slides[new_idx]
             clear_slide_shapes(slide)
             copy_shapes_to_slide(prototype_slide, slide)
+            sync_header_pictures_from_reference(prototype_slide, slide)
             insert_after = prototype_idx + idx - 1
             move_slide_after(prs, new_idx, insert_after)
             slide_idx = insert_after + 1

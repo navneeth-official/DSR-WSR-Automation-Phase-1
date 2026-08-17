@@ -13,6 +13,7 @@ from app.services.ppt_cover_date import (
     format_cover_date,
     sync_cover_slide_wsr_date,
 )
+from app.services.ppt_logo_sync import resolve_logo_reference_slide, sync_all_delivery_slide_logos
 from app.services.template_profile import clone_prototype_service_profile
 from app.wsr_engine.content_parser import load_content
 from app.wsr_engine.models import BuildReport, TitleFormat
@@ -139,6 +140,12 @@ class WsrEngine:
                 logger.warning("Cover slide date placeholder not found")
 
         from app.wsr_engine.slide_ops import normalize_slide_partnames
+
+        logo_ref = resolve_logo_reference_slide(writer.template_prs, template.projects)
+        if logo_ref is not None:
+            synced = sync_all_delivery_slide_logos(writer.prs, logo_ref)
+            if synced:
+                logger.info("Synced header logos on %d delivery slide(s)", synced)
 
         normalize_slide_partnames(writer.prs)
         if not skeleton_mode:
