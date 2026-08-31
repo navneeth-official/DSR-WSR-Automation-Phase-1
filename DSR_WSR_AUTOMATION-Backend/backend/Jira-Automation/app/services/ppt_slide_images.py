@@ -9,7 +9,7 @@ from typing import Any
 
 from pptx import Presentation
 
-from app.rendering.com_backend import ComSlideRendererBackend
+from app.rendering.factory import get_slide_renderer_backend
 
 
 def _slide_title(slide) -> str:
@@ -48,7 +48,7 @@ def export_all_slides_to_png(
     *,
     width_px: int = 1280,
 ) -> list[dict[str, Any]]:
-    """Export every slide in the deck to PNG (Windows COM)."""
+    """Export every slide in the deck to PNG."""
     ppt_path = Path(ppt_path).resolve()
     output_dir = Path(output_dir)
     indices = [s["slide_index"] for s in list_all_slide_indices(ppt_path)]
@@ -88,7 +88,7 @@ def export_slides_to_png(
     width_px: int = 1920,
 ) -> list[dict[str, Any]]:
     """
-    Export selected slides to PNG using PowerPoint COM (Windows only).
+    Export selected slides to PNG using the configured renderer backend.
 
     Returns list of {slide_index, title, image_path}.
     """
@@ -99,7 +99,7 @@ def export_slides_to_png(
     if indices is None:
         indices = [s["slide_index"] for s in list_delivery_slide_indices(ppt_path)]
 
-    backend = ComSlideRendererBackend()
+    backend = get_slide_renderer_backend()
     image_paths = backend.render_slides(
         ppt_path,
         output_dir,

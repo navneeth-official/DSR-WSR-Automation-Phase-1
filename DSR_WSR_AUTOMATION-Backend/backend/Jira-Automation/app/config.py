@@ -65,6 +65,11 @@ class Settings:
         "GOOGLE_DRIVE_UPLOAD_ENABLED", ""
     ).lower() in ("1", "true", "yes")
 
+    # Slide preview export: auto | com | libreoffice
+    ppt_render_backend: str = os.getenv("PPT_RENDER_BACKEND", "auto")
+    libreoffice_path: str = os.getenv("LIBREOFFICE_PATH", "")
+    pdftoppm_path: str = os.getenv("PDFTOPPM_PATH", "")
+
 
 @lru_cache
 def get_settings() -> Settings:

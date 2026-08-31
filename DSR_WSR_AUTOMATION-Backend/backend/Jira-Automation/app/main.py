@@ -30,4 +30,6 @@ app.include_router(tracks_router)
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    from app.rendering.factory import describe_active_renderer
+
+    return {"status": "ok", "slide_renderer": describe_active_renderer()}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.rendering.com_backend import ComSlideRendererBackend
+from app.rendering.factory import get_slide_renderer_backend
 from app.rendering.protocol import SlideRendererBackend
 
 
@@ -26,7 +26,7 @@ class PowerPointRenderer:
     ) -> None:
         self._output_dir = Path(output_dir) if output_dir is not None else None
         self._width_px = width_px
-        self._backend: SlideRendererBackend = backend or ComSlideRendererBackend()
+        self._backend: SlideRendererBackend = backend or get_slide_renderer_backend()
 
     @property
     def output_dir(self) -> Path | None:
