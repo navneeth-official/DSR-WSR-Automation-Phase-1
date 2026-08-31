@@ -1,0 +1,30 @@
+# On push to GitHub, trigger a GitLab pipeline (Option B — no Docker).
+#
+# GitHub repo secrets (Settings → Secrets and variables → Actions):
+#   GITLAB_TRIGGER_TOKEN — GitLab → Settings → CI/CD → Pipeline triggers
+#   GITLAB_PROJECT_ID    — GitLab → Settings → General (numeric project ID)
+#
+# GitLab must have the same branch and .gitlab-ci.yml (push to GitLab remote or mirror).
+
+name: Trigger GitLab Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger GitLab pipeline
+        env:
+          GITLAB_TRIGGER_TOKEN: ${{ secrets.GITLAB_TRIGGER_TOKEN }}
+          GITLAB_PROJECT_ID: ${{ secrets.GITLAB_PROJECT_ID }}
+          GIT_REF: ${{ github.ref_name }}
+        run: |
+          curl --fail --show-error -X POST \
+            --form "token=${GITLAB_TRIGGER_TOKEN}" \
+            --form "ref=${GIT_REF}" \
+            "https://gitlab.com/api/v4/projects/${GITLAB_PROJECT_ID}/trigger/pipeline"

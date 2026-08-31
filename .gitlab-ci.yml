@@ -1,0 +1,25 @@
+# GitLab CI/CD — deploy to GCP VM via shell runner (no Docker).
+# Requires a project runner tagged `dsr-wsr-vm` on the VM.
+#
+# Set in GitLab → Settings → CI/CD → Variables (optional):
+#   DEPLOY_USER          — Linux user on VM (default: g10xtestid)
+#   DEPLOY_ENVIRONMENT_URL — e.g. http://35.x.x.x
+
+stages:
+  - deploy
+
+variables:
+  GIT_STRATEGY: none
+  DEPLOY_USER: g10xtestid
+
+deploy_production:
+  stage: deploy
+  tags:
+    - dsr-wsr-vm
+  rules:
+    - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main"
+  script:
+    - bash scripts/deploy-vm.sh
+  environment:
+    name: production
+    url: $DEPLOY_ENVIRONMENT_URL
