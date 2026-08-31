@@ -18,8 +18,8 @@ Use this file to verify **GitHub push → GitHub Action → GitLab pipeline → 
 ## Last test push
 
 ```
-status: not-run-yet
-updated: 2026-08-31T00:00:00Z
+status: e2e-test-1
+updated: 32-08-2026
 note: Change this block, commit, push, then verify pipeline + this file on VM via git log.
 ```
 
