@@ -1,0 +1,1 @@
+# App Engine Standard (python312) — static handlers only; no runtime dependencies.

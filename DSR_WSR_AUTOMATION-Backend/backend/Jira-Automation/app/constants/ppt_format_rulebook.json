@@ -1,0 +1,607 @@
+{
+  "meta": {
+    "template_name": "G10X H-E-B WSR Sustainment",
+    "template_file": "G10X H-E-B WSR Sustainment 05 June 2026 .pptx",
+    "version": "2.0.0",
+    "reference_slides": {
+      "canonical_style": {
+        "index": 2,
+        "title": "Delivery status – Cost Core Service",
+        "purpose": "Paragraph bullet styles (lvl 0/7/1)"
+      },
+      "canonical_fill": {
+        "index": 3,
+        "title": "Delivery status – Supplier Core Services",
+        "purpose": "Fill-to-mark capacity and multi-sprint layout reference"
+      }
+    },
+    "slide_aspect_ratio": "16:9",
+    "slide_size_inches": { "width": 13.333, "height": 7.5 },
+    "scoring": {
+      "architecture": "hybrid",
+      "scope": "entire_deck",
+      "per_slide_scale": "0-100",
+      "deck_score_method": "weighted_average",
+      "deterministic_weight": 0.70,
+      "visual_weight": 0.30,
+      "deterministic_pass_threshold": 70,
+      "visual_pass_threshold": 70,
+      "critical_auto_fail": true,
+      "deterministic_categories": [
+        "overlap",
+        "clipping",
+        "overflow",
+        "footer_intrusion",
+        "alignment",
+        "geometry",
+        "spacing_metrics",
+        "utilization_metrics",
+        "typography"
+      ],
+      "visual_categories": {
+        "visual_balance": 0.30,
+        "readability": 0.25,
+        "whitespace_quality": 0.20,
+        "presentation_quality": 0.25
+      },
+      "legacy_ai_rulebook": {
+        "deprecated": true,
+        "note": "Mode 'ai' retained for backward compatibility only. Use hybrid full mode."
+      }
+    }
+  },
+  "slide_title": {
+    "rules": [
+      {
+        "id": "TITLE-01",
+        "name": "Title format",
+        "description": "Slide title must follow: Delivery status – {Service Name}",
+        "pattern": "^Delivery status – .+",
+        "contd_pattern": "^Delivery status – .+\\s*\\(Contd[.…]+\\)\\s*$"
+      },
+      {
+        "id": "TITLE-02",
+        "name": "Title font",
+        "description": "Manrope Bold 16pt",
+        "font_name": "Manrope",
+        "font_size_pt": 16,
+        "bold": true
+      },
+      {
+        "id": "TITLE-03",
+        "name": "Title position",
+        "description": "Top-left title placeholder geometry from G10X",
+        "top_in": { "target": 0.4634, "tolerance_in": 0.05 },
+        "left_in": { "target": 0.4649, "tolerance_in": 0.05 }
+      }
+    ]
+  },
+  "highlights_header": {
+    "rules": [
+      {
+        "id": "HL-HDR-01",
+        "name": "Highlights bar label",
+        "description": "Row 0 cell text is exactly 'Highlights'",
+        "expected_text": "Highlights"
+      },
+      {
+        "id": "HL-HDR-02",
+        "name": "Highlights header font",
+        "description": "Manrope Bold 14pt, white on dark maroon background",
+        "font_name": "Manrope",
+        "font_size_pt": 14,
+        "bold": true
+      },
+      {
+        "id": "HL-HDR-03",
+        "name": "Status columns",
+        "description": "Overall status (orange), Last week / This week (green) present on main delivery slides",
+        "required_labels": ["Overall status", "Last week", "This week"]
+      }
+    ]
+  },
+  "highlights_content": {
+    "paragraph_hierarchy": [
+      {
+        "id": "HL-P-01",
+        "level": 0,
+        "role": "project_name",
+        "description": "Optional project label (e.g. SPUR) — bold, no bullet",
+        "bullet": "none",
+        "font_name": "Manrope",
+        "font_size_pt": 12,
+        "bold": true,
+        "optional": true
+      },
+      {
+        "id": "HL-P-02",
+        "level": 0,
+        "role": "sprint_line",
+        "description": "Sprint summary — round bullet •",
+        "bullet": "•",
+        "font_size_pt": 12,
+        "bold_prefix": true,
+        "bold_prefix_text": "Sprint name and status through first comma",
+        "light_suffix_font": "Manrope Light",
+        "format": "Sprint – {Name}, {Status} ({Dates}) Stories (Total – N, Done – X, In-review – Y, In-progress – Z)"
+      },
+      {
+        "id": "HL-P-03",
+        "level": 0,
+        "role": "current_week_status",
+        "description": "Current week sprint status — round bullet •",
+        "bullet": "•",
+        "expected_text": "Current week sprint status",
+        "font_size_pt": 12,
+        "bold": false
+      },
+      {
+        "id": "HL-P-04",
+        "level": 7,
+        "role": "category_header",
+        "description": "Story category headers — ONLY the G10X solid right-pointing arrowhead bullet (Wingdings Ø). No other bullet style is allowed.",
+        "bullet": "Ø",
+        "bullet_font": "Wingdings,Sans-Serif",
+        "bullet_visual": "solid right-pointing arrowhead (filled chevron / triangle)",
+        "bullet_unicode": "U+00D8",
+        "bullet_note": "PowerPoint stores buChar Ø with buFont Wingdings. Together they render as the black right-pointing arrowhead from the G10X template. Using Ø without Wingdings, or any other character (•, -, ₋, ▶, ➤, →), is INVALID.",
+        "forbidden_bullets": ["•", "-", "₋", "▶", "►", "➤", "→", ">"],
+        "forbidden_bullet_note": "Round bullets are for sprint lines; dashes are for story items; Unicode triangles/arrows are NOT substitutes.",
+        "font_name": "Manrope",
+        "font_size_pt": 12,
+        "bold": true,
+        "patterns": [
+          "Stories completed this week – {N} stories",
+          "Stories released for partner review – {N} stories",
+          "Stories in-progress this week – {N} stories"
+        ]
+      },
+      {
+        "id": "HL-P-05",
+        "level": 1,
+        "role": "story_item",
+        "description": "Individual story lines — dash bullet ₋ or -, regular weight, aligned with current-week indent (NOT with category arrow)",
+        "bullet": ["₋", "-"],
+        "font_size_pt": 12,
+        "bold": false,
+        "preferred_fonts": ["Manrope Light", "+mn-lt"]
+      },
+      {
+        "id": "HL-P-06",
+        "level": 0,
+        "role": "sprint_gap",
+        "description": "Exactly one blank paragraph between sprint blocks",
+        "bullet": "none",
+        "text": "",
+        "max_per_sprint_boundary": 1
+      }
+    ],
+    "content_order_per_sprint": [
+      "sprint_line",
+      "current_week_status",
+      "completed_category_and_stories",
+      "released_category_and_stories",
+      "inprogress_category_and_stories"
+    ],
+    "spacing_rules": [
+      {
+        "id": "HL-SPC-01",
+        "name": "Category to first story",
+        "description": "NO blank line between category header and first story bullet",
+        "max_blank_lines": 0
+      },
+      {
+        "id": "HL-SPC-02",
+        "name": "Story to story",
+        "description": "Single line spacing within a story list — template uses fixed 16pt line height (a:lnSpc/a:spcPts val=1600) for 12pt body text",
+        "spc_bef_pt": 0,
+        "line_spacing_pt": 16
+      },
+      {
+        "id": "HL-SPC-03",
+        "name": "Between sprint blocks",
+        "description": "Visual separation between sprint blocks — template uses 0–1 blank lines depending on content. Do NOT require a fixed blank-line count; only flag when sprint blocks appear merged or excessively separated.",
+        "evaluation": "visual_grouping",
+        "blank_lines_typical_range": [0, 1]
+      },
+      {
+        "id": "HL-SPC-04",
+        "name": "Paragraph space-before on stories",
+        "description": "Story bullets use spcBef=0",
+        "spc_bef_pt": 0
+      }
+    ],
+    "space_utilization": {
+      "id": "HL-UTIL-01",
+      "description": "Deprecated for deterministic evaluation — use measured layout bands instead of main vs contd labels.",
+      "evaluation": "layout_measurement",
+      "dense_fill_threshold": 0.85,
+      "notes": "Deterministic rules use hl_waste_dense_fill_max_in and hl_waste_sparse_ka_max_in from template_layout_thresholds.json. Slide type (is_contd) must not change thresholds."
+    },
+    "sparse_sizing": {
+      "id": "HL-SIZE-01",
+      "description": "Internal HL slack below last bullet (hl_waste_below_text_in). Dense-fill slides: up to ~0.12 in is normal padding. Sparse HL+KA slides may have up to ~1.05 in by design. Flag HL-SIZE-01 / CONT-SPARSE-01 only above calibrated bands in template_layout_thresholds.json.",
+      "evaluation": "visual_balance",
+      "hl_waste_below_text_typical_max_in": 0.1218,
+      "hl_waste_dense_fill_max_in": 0.1218,
+      "hl_waste_sparse_ka_max_in": 1.0488,
+      "thresholds_file": "app/constants/template_layout_thresholds.json",
+      "notes": "Overlap/clipping is HL-OVERFLOW-01 / KA-OVERLAP-01, not HL-SIZE-01"
+    }
+  },
+  "key_activities": {
+    "rules": [
+      {
+        "id": "KA-01",
+        "name": "KA header text",
+        "description": "Header row text: Key activities for next week",
+        "expected_text": "Key activities for next week"
+      },
+      {
+        "id": "KA-02",
+        "name": "KA header font",
+        "description": "Manrope Bold 14pt",
+        "font_name": "Manrope",
+        "font_size_pt": 14,
+        "bold": true
+      },
+      {
+        "id": "KA-03",
+        "name": "KA content font",
+        "description": "Manrope Light / theme body 12pt",
+        "font_size_pt": 12,
+        "bold": false
+      },
+      {
+        "id": "KA-04",
+        "name": "KA project grouping",
+        "description": "Optional bold project sub-headers with round bullet items below",
+        "project_header_bold": true,
+        "item_bullet": "•"
+      }
+    ],
+    "placement_rules": [
+      {
+        "id": "KA-PLC-01",
+        "name": "KA after Highlights",
+        "description": "Key Activities must only appear after Highlights content is complete on that slide",
+        "forbidden": "KA on same slide while Highlights has large unused area and overflow content on contd"
+      },
+      {
+        "id": "KA-PLC-02",
+        "name": "HL to KA tab spacing",
+        "description": "Spacing between HL table bottom border and KA header (hl_ka_gap_in — the double-arrow gap). Calibrated target 0.3111 in (~2 body lines). Flag when hl_ka_gap_in > 0.3311 in.",
+        "primary_metric": "hl_ka_gap_in",
+        "min_clearance_in": 0.15,
+        "target_border_gap_in": 0.3111,
+        "max_border_gap_in": 0.3311
+      },
+        {
+          "id": "KA-PLC-03",
+          "name": "KA-only contd slide",
+          "description": "When main slide is full of Highlights, KA may move to (Contd...) with no Highlights table. layout_type ka_only_contd is VALID — do NOT flag missing HL tab or HL-UTIL-01.",
+          "allowed_layout": "ka_contd_only",
+          "ai_must_not_flag": ["CONT-SPARSE-01", "missing HL tab"]
+        },
+        {
+          "id": "KA-PLC-04",
+          "name": "KA on main when space permits",
+          "description": "When Highlights text ends well above the HL table bottom and KA fits within the footer safe zone (~6.29 in), Key Activities MUST stay on the main slide — do not create a KA-only (Contd...) slide",
+          "min_room_below_text_in": 1.0,
+          "max_ka_bottom_in": 6.29,
+          "forbidden": "KA-only (Contd...) when main slide has enough vertical space below sparse Highlights"
+        }
+    ],
+    "sparse_sizing": {
+      "id": "KA-SIZE-01",
+      "description": "When Key Activities has few items, shrink the KA table to content height — do not leave a large empty area below the last bullet",
+      "max_waste_below_text_in": 0.5
+    }
+  },
+  "layout_principles": {
+    "content_agnostic_note": "All layout rules are content-relative formulas. NEVER pass or fail a slide by comparing it to a named reference slide (e.g. Cost Core, Supplier). The same rules apply to every service; only content volume changes box heights and whether (Contd...) is needed.",
+    "dynamic_sizing": {
+      "sparse": "Shrink HL and KA gray content boxes to rendered text + standard padding. White space at the bottom of the slide is valid and preferred over stretched boxes.",
+      "dense": "Expand HL up to the available column budget (footer safe zone) when content requires it.",
+      "violation_ids": ["HL-SIZE-01", "KA-SIZE-01", "CONT-SPARSE-01"]
+    },
+    "hl_ka_spacing": {
+      "description": "HL–KA tab spacing = hl_ka_gap_in (HL table bottom to KA header). Calibrated target 0.3111 in, max 0.3311 in. Minimum text_ka_clearance_in >= 0.15 in (no merge). Internal HL slack uses dense-fill vs sparse HL+KA bands (see template_layout_thresholds.json).",
+      "primary_rule": "hl_ka_gap_in <= 0.3311 in when key_activities present",
+      "border_gap_metric": "hl_ka_gap_in",
+      "text_clearance_metric": "text_ka_clearance_in",
+      "min_text_clearance_in": 0.15,
+      "target_border_gap_in": 0.3111,
+      "max_border_gap_in": 0.3311,
+      "hl_waste_dense_fill_max_in": 0.1218,
+      "hl_waste_sparse_ka_max_in": 1.0488,
+      "violation_ids": ["KA-OVERLAP-01", "HL-OVERFLOW-01", "KA-PLC-02"]
+    },
+    "footer_boundary": {
+      "max_bottom_in": 6.29,
+      "description": "Footer rule applies to RENDERED TEXT, not table borders. Dense HL-only slides may extend the table toward the dotted line. Fail GEO-02 only when estimated_text_bottom_in or ka_rendered_text_bottom_in enters the footer zone.",
+      "violation_id": "GEO-02",
+      "content_metrics": ["estimated_text_bottom_in", "ka_rendered_text_bottom_in"]
+    },
+    "contd_decision_tree": [
+      {
+        "condition": "HL + KA fit in footer zone with text clearance >= 0.15 in",
+        "outcome": "Keep both on main slide"
+      },
+      {
+        "condition": "HL sparse with room below text and KA fits in footer zone",
+        "outcome": "KA on main — never KA-only (Contd...) (KA-PLC-04)"
+      },
+      {
+        "condition": "HL dense (utilization ≥ 85%) and KA cannot fit below HL on main within footer",
+        "outcome": "HL-only or HL-full main + KA-only (Contd...) — valid Supplier/Pharmacy pattern"
+      },
+      {
+        "condition": "HL dense, fills column, KA does not fit below HL on main",
+        "outcome": "HL-only main + KA-only (Contd...) slide"
+      },
+      {
+        "condition": "HL content exceeds main column capacity",
+        "outcome": "HL (Contd...) slide"
+      },
+      {
+        "condition": "layout_type ka_only_contd — HL finished on prior slide, only KA remains",
+        "outcome": "Valid — do NOT flag missing HL (KA-PLC-03)"
+      },
+      {
+        "condition": "(Contd...) slide has few bullets in oversized HL box",
+        "outcome": "Sparse contd violation (CONT-SPARSE-01)"
+      }
+    ],
+    "overlap_rules": {
+      "text_to_ka": "Rendered HL text must not intrude into KA (text_ka_clearance_in >= 0.15 in)",
+      "hl_text_inside_table": "HL text must not extend below the HL table border (hl_text_overflow_in == 0)",
+      "footer_content": "Rendered HL/KA text must not enter footer zone (estimated_text_bottom_in, ka_rendered_text_bottom_in <= 6.29 in)",
+      "violation_ids": ["KA-OVERLAP-01", "HL-OVERFLOW-01", "GEO-02"]
+    },
+    "metrics_the_ai_must_use": [
+      "hl_waste_below_text_in",
+      "hl_text_overflow_in",
+      "ka_waste_below_text_in",
+      "ka_rendered_text_bottom_in",
+      "utilization_ratio",
+      "effective_utilization_ratio",
+      "visual_line_count",
+      "filled_paragraph_count",
+      "hl_ka_gap_in",
+      "text_ka_clearance_in",
+      "estimated_text_bottom_in",
+      "layout_type",
+      "is_contd",
+      "key_activities",
+      "highlights.position_in",
+      "key_activities.position_in"
+    ]
+  },
+  "layout_geometry": {
+    "behaviors": {
+      "on_slide_ka": {
+        "description": "Main slide with both Highlights and Key Activities when content fits in footer zone",
+        "hl_sizing": "Sparse: shrink HL to text; dense: expand toward KA anchor",
+        "ka_placement": "Directly below HL with ~2 body lines between table borders (~0.31 in)"
+      },
+      "hl_only_main": {
+        "description": "Main slide with only Highlights when HL is dense and KA moves to (Contd...)",
+        "hl_sizing": "Expand HL to fill column up to footer safe zone"
+      },
+      "contd_hl_ka": {
+        "description": "Continuation slide with both HL overflow and KA when both fit on contd",
+        "hl_sizing": "Shrink when sparse; expand when dense"
+      },
+      "ka_contd_only": {
+        "description": "Continuation slide with only Key Activities when main is HL-full",
+        "ka_sizing": "Shrink KA table to item count"
+      }
+    },
+    "rules": [
+      {
+        "id": "GEO-01",
+        "name": "Content cell top-align",
+        "description": "Highlights content cell (row 2) text is top-aligned, not vertically centered"
+      },
+      {
+        "id": "GEO-02",
+        "name": "Footer safe zone",
+        "description": "KA bottom must not extend below ~6.29 in. Dense HL-only main may extend to ~6.55 in when utilization >= 85%.",
+        "max_ka_bottom_in": 6.29,
+        "max_hl_dense_bottom_in": 6.55
+      },
+      {
+        "id": "GEO-03",
+        "name": "Highlights table width",
+        "description": "Full content width ~12.89 in",
+        "width_in": { "target": 12.892, "tolerance_in": 0.15 }
+      }
+    ]
+  },
+  "continuation_slides": {
+    "rules": [
+      {
+        "id": "CONT-01",
+        "name": "Contd title suffix",
+        "description": "Continuation slides append (Contd…) to service title"
+      },
+      {
+        "id": "CONT-02",
+        "name": "No repeated category header",
+        "description": "When continuing same story bucket from previous slide, do NOT repeat category header (e.g. Stories completed this week)"
+      },
+      {
+        "id": "CONT-03",
+        "name": "No repeated sprint block",
+        "description": "When continuing mid-sprint, do NOT repeat sprint line or Current week sprint status"
+      },
+      {
+        "id": "CONT-04",
+        "name": "New sprint on contd",
+        "description": "A new sprint block on contd MUST include full sprint line + current week + category headers"
+      },
+      {
+        "id": "CONT-05",
+        "name": "No sparse contd",
+        "description": "(Contd...) slides must not have large empty Highlights area when only a few bullets present"
+      }
+    ]
+  },
+  "repair_instructions": {
+    "for_model": "You are a G10X WSR delivery-status deck layout repair planner. Follow layout_principles (content-agnostic — never compare to named reference slides). Given extracted slide metrics and deterministic violations, return a FixPlan JSON with ONLY whitelisted actions. Prefer layout_repair and in-place geometry fixes before rebuild_with_hints. Map: HL-SIZE-01/KA-SIZE-01/CONT-SPARSE-01/KA-PLC-01/KA-PLC-02/KA-OVERLAP-01 → layout_repair; KA-PLC-04 → layout_repair + rebuild if needed; TITLE-01 → fix_title_en_dash; HL-SPC-01 → remove_category_story_blanks; HL-SPC-03 → remove_extra_sprint_blanks; GEO-02 → layout_repair or rebuild.",
+    "thresholds": {
+      "source": "app/constants/template_layout_thresholds.json",
+      "min_text_ka_clearance_in": 0.15,
+      "utilization_threshold": 0.85,
+      "sparse_contd_max_filled": 3,
+      "hl_ka_max_gap_in": 0.3311,
+      "hl_ka_target_gap_in": 0.3111,
+      "hl_waste_dense_fill_max_in": 0.1218,
+      "hl_waste_sparse_ka_max_in": 1.0488,
+      "footer_max_bottom_in": 6.29,
+      "max_waste_below_text_in": 0.5
+    },
+    "allowed_actions": [
+      "reflow_hl_ka",
+      "fix_category_bullets",
+      "remove_extra_sprint_blanks",
+      "shrink_sparse_hl",
+      "layout_repair",
+      "fix_title_en_dash",
+      "rebuild_with_hints"
+    ],
+    "output_schema": {
+      "fixes": [
+        {
+          "action": "reflow_hl_ka | fix_category_bullets | remove_extra_sprint_blanks | shrink_sparse_hl | layout_repair | fix_title_en_dash | rebuild_with_hints",
+          "slide_index": "number (1-based, optional for rebuild)",
+          "service_title": "string (service name without Delivery status prefix)",
+          "params": "object (action-specific)"
+        }
+      ],
+      "reason": "string"
+    },
+    "action_hints": {
+      "reflow_hl_ka": { "params": { "expand_for_wrap": true, "layout_mode": "expanded" } },
+      "rebuild_with_hints": {
+        "params": {
+          "pack_all_sections_on_main": true,
+          "suppress_hl_contd": true,
+          "force_hl_only_main": false
+        }
+      }
+    }
+  },
+  "evaluation_architecture": {
+    "version": "2.0",
+    "principle": "Deterministic geometry is the source of truth. AI evaluates subjective visual quality only.",
+    "layers": {
+      "deterministic": {
+        "enforcement": "code_only",
+        "source": "ppt_format_extractor + ppt_format_violations",
+        "validates": [
+          "overlap",
+          "clipping",
+          "overflow",
+          "footer_intrusion",
+          "alignment",
+          "geometry",
+          "distance_metrics",
+          "utilization_metrics"
+        ],
+        "auto_fail_on_critical": true
+      },
+      "visual": {
+        "enforcement": "ai_visual_reviewer",
+        "source": "rendered PNG + layout_metrics context",
+        "validates": [
+          "visual_balance",
+          "readability",
+          "whitespace_quality",
+          "presentation_quality"
+        ],
+        "must_not_measure": [
+          "coordinates",
+          "distances",
+          "textbox_dimensions",
+          "overlaps",
+          "clipping",
+          "footer_violations"
+        ]
+      }
+    },
+    "rule_enforcement_tags": {
+      "deterministic": [
+        "TITLE-01",
+        "HL-P-04",
+        "HL-SPC-01",
+        "KA-OVERLAP-01",
+        "HL-OVERFLOW-01",
+        "HL-SIZE-01",
+        "KA-PLC-02",
+        "CONT-SPARSE-01",
+        "KA-SIZE-01",
+        "GEO-02",
+        "KA-PLC-04",
+        "HL-HDR-02",
+        "HL-P-01",
+        "HL-P-02",
+        "HL-P-03",
+        "HL-P-05",
+        "HL-SPC-02",
+        "HL-SPC-04"
+      ],
+      "visual_subjective": [
+        "VISUAL-BALANCE",
+        "VISUAL-READABILITY",
+        "VISUAL-WHITESPACE",
+        "VISUAL-PRESENTATION"
+      ],
+      "legacy_ai_only": [
+        "TITLE-02",
+        "TITLE-03",
+        "HL-HDR-01",
+        "HL-HDR-03",
+        "KA-01",
+        "CONT-01"
+      ]
+    }
+  },
+  "evaluation_instructions": {
+    "deprecated": true,
+    "note": "Legacy AI rulebook auditor (mode 'ai'). Geometry rules are enforced deterministically in v2.0.",
+    "for_model": "DEPRECATED — use visual quality reviewer for subjective assessment. Deterministic code enforces all measurable layout rules.",
+    "output_schema": {
+      "deck_score": "number 0-100",
+      "deck_pass": "boolean",
+      "slides": [
+        {
+          "slide_index": "number (1-based)",
+          "title": "string",
+          "score": "number 0-100",
+          "pass": "boolean",
+          "category_scores": {
+            "typography": "number 0-100",
+            "bullet_hierarchy": "number 0-100",
+            "spacing": "number 0-100",
+            "layout_geometry": "number 0-100",
+            "content_structure": "number 0-100",
+            "space_utilization": "number 0-100"
+          },
+          "violations": [
+            {
+              "rule_id": "string",
+              "severity": "critical|major|minor",
+              "message": "string",
+              "suggestion": "string"
+            }
+          ],
+          "strengths": ["string"]
+        }
+      ],
+      "summary": "string",
+      "critical_issues": ["string"]
+    }
+  }
+}

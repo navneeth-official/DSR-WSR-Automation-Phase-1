@@ -1,0 +1,17 @@
+/**
+ * G10X H-E-B WSR template palette (from G10X PowerPoint theme)
+ * - Black: navigation / chrome
+ * - Red (#D3072A): active tabs, selection, accents
+ * - Orange (#F0500A): primary actions / buttons
+ */
+:root {
+  --brand-black: #202020;
+  --brand-black-pure: #000000;
+  --brand-red: #d3072a;
+  --brand-red-dark: #5a0a03;
+  --brand-orange: #f0500a;
+  --brand-orange-hover: #d94809;
+  --brand-cream: #f5f3f1;
+  --brand-tan: #cfc5b7;
+  --brand-white: #ffffff;
+}

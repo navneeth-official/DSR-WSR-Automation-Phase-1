@@ -1,0 +1,10 @@
+.venv
+.env
+.env.local
+.env.docker
+.env.aws
+__pycache__
+*.pyc
+.git
+sample*.txt
+*rovo*response*

@@ -1,0 +1,21 @@
+flowchart TB
+    Projects["projects
+    project_id PK
+    project_key
+    project_name"]
+
+    Sprints["sprints
+    sprint_id PK
+    sprint_name
+    sprint_status
+    sprint dates"]
+
+    Stories["jira_stories
+    jira_key PK
+    project_id FK
+    sprint_id FK
+    title, summary, status
+    assignee, story_points, ..."]
+
+    Projects -->|"1 : many"| Stories
+    Sprints -->|"1 : many"| Stories

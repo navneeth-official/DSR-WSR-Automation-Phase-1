@@ -1,0 +1,53 @@
+# Google App Engine — HEB Status Tracker (React / Vite frontend)
+#
+# Prerequisites (run once per GCP project):
+#   gcloud auth login
+#   gcloud config set project YOUR_PROJECT_ID
+#   gcloud app create --region=us-central1
+#   gcloud services enable appengine.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+#   # Wait 5–10 minutes after enabling APIs for Google-managed service accounts to provision.
+#
+# Build and deploy:
+#   npm install
+#   npm run build
+#   gcloud app deploy app.yaml --project=YOUR_PROJECT_ID
+#
+# If deploy fails with "ServiceAccountInfoDataType ... cloudbuild":
+#   - Use a standard GCP project (console.cloud.google.com), not a sandbox/Firebase Studio project.
+#   - Re-run the services enable command above and wait, then retry deploy.
+#
+# API routing: frontend calls /api/* — route to your backend via dispatch.yaml or a load balancer.
+
+runtime: python312
+env: standard
+
+service: default
+
+instance_class: F1
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 5
+  target_cpu_utilization: 0.65
+
+handlers:
+  # Vite hashed bundles — long cache
+  - url: /assets
+    static_dir: dist/assets
+    secure: always
+    http_headers:
+      Cache-Control: public, max-age=31536000, immutable
+
+  # Other static files emitted at the dist root
+  - url: /(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|json|txt|map))$
+    static_files: dist/\1
+    upload: dist/(.*\.(js|css|png|jpg|jpeg|gif|svg|ico|webp|woff|woff2|json|txt|map))$
+    secure: always
+
+  # SPA fallback — all routes serve index.html
+  - url: /.*
+    static_files: dist/index.html
+    upload: dist/index.html
+    secure: always
+    http_headers:
+      Cache-Control: no-cache

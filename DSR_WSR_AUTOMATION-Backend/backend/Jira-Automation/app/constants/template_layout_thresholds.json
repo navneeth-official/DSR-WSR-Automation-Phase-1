@@ -1,0 +1,25 @@
+{
+  "min_text_ka_clearance_in": 0.15,
+  "hl_text_overflow_tolerance_in": 0.05,
+  "footer_content_max_bottom_in": 6.29,
+  "hl_waste_extreme_in": 1.2988,
+  "hl_waste_stretch_max_util": 0.2,
+  "ka_waste_extreme_in": 0.5,
+  "ka_waste_stretch_max_util": 0.2,
+  "hl_ka_clearance_typical_max_in": 1.3473,
+  "hl_waste_below_text_typical_max_in": 1.05,
+  "hl_waste_dense_fill_max_in": 1.05,
+  "hl_waste_contd_hl_max_in": 1.05,
+  "hl_waste_sparse_ka_max_in": 1.05,
+  "hl_ka_border_gap_target_in": 0.472,
+  "hl_ka_border_gap_max_in": 0.5,
+  "hl_dense_fill_min_effective_util": 0.85,
+  "footer_text_min_margin_in": 0.1581,
+  "template_file": "HEB_Delivery_Status.pptx",
+  "calibrated_slide_count": 15,
+  "calibration_notes": [
+    "Unified HL internal waste band: 1.05 in for main, contd, and sparse HL+KA slides",
+    "HL\u2013KA border gap: Sustainment builder target 0.472 in (~2 body lines), max 0.50 in",
+    "Footer: max text bottom 6.1319 in, min margin 0.1581 in \u2192 limit 6.2900 in"
+  ]
+}

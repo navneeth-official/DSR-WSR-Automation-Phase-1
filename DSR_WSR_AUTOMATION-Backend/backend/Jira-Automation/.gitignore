@@ -1,0 +1,52 @@
+# Secrets and local config
+.env
+.env.local
+.env.docker
+.env.aws
+.env.*.local
+.msal_token_cache.bin
+.google_drive_token.json
+.google_drive_folder.json
+credentials/google-oauth-client.json
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Alembic
+alembic/versions/__pycache__/
+
+# Generated PPT pipeline outputs (keep folder via .gitkeep)
+output/*
+!output/.gitkeep
+
+# Stray generated decks at repo root
+HEB_Delivery_Status*.pptx
+ppt_content.json
+ppt_content_preview.txt
+*.format_eval.json
+*.format_eval.txt
+*.hybrid_loop.json
+*.vision_loop.json
+*.layout_hints.json
+layout_geometry_debug.log
+
+sample rovo response.txt
+sample*.txt
+*rovo*response*.txt
+*.json.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
