@@ -82,12 +82,30 @@ sudo gitlab-runner register
 # Tags: dsr-wsr-vm
 ```
 
-### 4. systemd service paths
+### 4. systemd service
 
-Ensure `/etc/systemd/system/dsr-wsr-api.service` uses:
+Copy the unit file from the repo (paths match `~/DSR-WSR-AUTOMATION`):
 
-- `WorkingDirectory=.../DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation`
-- `ExecStart=.../Jira-Automation/.venv/bin/uvicorn ...`
+```bash
+cd ~/DSR-WSR-AUTOMATION
+sudo cp scripts/dsr-wsr-api.service /etc/systemd/system/dsr-wsr-api.service
+sudo systemctl daemon-reload
+sudo systemctl enable dsr-wsr-api
+sudo systemctl start dsr-wsr-api
+curl -s http://127.0.0.1:8000/health
+```
+
+If your clone is not under `/home/g10xtestid/DSR-WSR-AUTOMATION`, edit paths in the unit file before `daemon-reload`.
+
+Manual uvicorn test (before systemd):
+
+```bash
+BACKEND=~/DSR-WSR-AUTOMATION/DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation
+cd "$BACKEND"
+source .venv/bin/activate
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+# Ctrl+C, then enable systemd
+```
 
 ## Flow
 
@@ -186,6 +204,46 @@ python -m alembic upgrade head
 ```
 
 If you forgot `dsr_user` password: `sudo -u postgres psql` → `ALTER USER dsr_user WITH PASSWORD 'newpassword';`
+
+### `dsr-wsr-api.service failed` / unavailable resources
+
+Usually the service file is **missing** or still points to an **old clone path** (before you re-cloned to `~/DSR-WSR-AUTOMATION`).
+
+On the VM:
+
+```bash
+sudo systemctl status dsr-wsr-api.service --no-pager
+sudo journalctl -xeu dsr-wsr-api.service --no-pager | tail -40
+systemctl cat dsr-wsr-api.service 2>/dev/null || echo "UNIT FILE MISSING"
+```
+
+**If unit missing or wrong paths** — reinstall from repo:
+
+```bash
+cd ~/DSR-WSR-AUTOMATION
+git pull origin master
+sudo cp scripts/dsr-wsr-api.service /etc/systemd/system/dsr-wsr-api.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed dsr-wsr-api
+sudo systemctl start dsr-wsr-api
+curl -s http://127.0.0.1:8000/health
+```
+
+**If port 8000 in use:**
+
+```bash
+sudo ss -tlnp | grep 8000
+sudo fuser -k 8000/tcp
+sudo systemctl start dsr-wsr-api
+```
+
+**If ExecStart path wrong** — verify uvicorn exists:
+
+```bash
+ls -la ~/DSR-WSR-AUTOMATION/DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation/.venv/bin/uvicorn
+```
+
+Then retry the GitLab pipeline.
 
 ## Notes
 

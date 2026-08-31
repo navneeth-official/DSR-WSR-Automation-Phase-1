@@ -1,0 +1,24 @@
+# Install on VM:
+#   sudo cp scripts/dsr-wsr-api.service /etc/systemd/system/dsr-wsr-api.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dsr-wsr-api
+#
+# Paths below match DEPLOY_REPO_ROOT=/home/g10xtestid/DSR-WSR-AUTOMATION
+
+[Unit]
+Description=DSR WSR FastAPI Backend
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=g10xtestid
+Group=g10xtestid
+WorkingDirectory=/home/g10xtestid/DSR-WSR-AUTOMATION/DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation
+EnvironmentFile=/home/g10xtestid/DSR-WSR-AUTOMATION/DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation/.env
+ExecStart=/home/g10xtestid/DSR-WSR-AUTOMATION/DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
