@@ -77,14 +77,14 @@ class LibreOfficeSlideRendererBackend:
                 timeout_sec=self._convert_timeout_sec,
             )
 
-        exported: list[Path] = []
-        for idx in indices:
-            page_png = _page_png_for_slide_index(page_pngs, idx)
-            if page_png is None:
-                continue
-            out_path = (output_dir / f"slide_{idx:02d}.png").resolve()
-            shutil.copy2(page_png, out_path)
-            exported.append(out_path)
+            exported: list[Path] = []
+            for idx in indices:
+                page_png = _page_png_for_slide_index(page_pngs, idx)
+                if page_png is None:
+                    continue
+                out_path = (output_dir / f"slide_{idx:02d}.png").resolve()
+                shutil.copy2(page_png, out_path)
+                exported.append(out_path)
         return exported
 
 
