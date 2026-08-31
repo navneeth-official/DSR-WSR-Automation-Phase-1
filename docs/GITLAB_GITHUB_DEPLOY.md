@@ -17,8 +17,9 @@ No Docker. Push to GitHub triggers GitLab; a **shell runner on the VM** runs `sc
 1. Create project on [gitlab.com](https://gitlab.com).
 2. Push this repo to GitLab (`git push gitlab master`) so GitLab has `.gitlab-ci.yml`.
 3. **Settings → CI/CD → Pipeline triggers** → Add trigger → copy token.
-4. **Settings → CI/CD → Variables** (optional):
-   - `DEPLOY_ENVIRONMENT_URL` = `http://YOUR_VM_STATIC_IP`
+4. **Settings → CI/CD → Variables**:
+   - `DEPLOY_REPO_ROOT` = absolute path to your clone on the VM (e.g. `/home/g10xtestid/DSR-WSR-AUTOMATION`)
+   - `DEPLOY_ENVIRONMENT_URL` = `http://YOUR_VM_STATIC_IP` (optional)
    - `DEPLOY_USER` = VM Linux user (default in YAML: `g10xtestid`)
 
 ### 2. GitHub secrets
@@ -81,6 +82,32 @@ bash scripts/test-gitlab-trigger.sh
 1. Edit `TRIGGER_TEST.md` (change the `updated:` line).
 2. Commit and push to GitHub `master`/`main`.
 3. Verify GitHub Action, GitLab pipeline, and on VM: `git log -1 TRIGGER_TEST.md`.
+
+## Troubleshooting
+
+### `scripts/deploy-vm.sh: No such file or directory`
+
+The shell runner uses `GIT_STRATEGY: none` (no GitLab checkout). The job must run the script from your **permanent VM clone**, not the runner build folder.
+
+On the VM, find the clone path:
+
+```bash
+sudo -u g10xtestid bash -lc 'find ~ -name deploy-vm.sh 2>/dev/null'
+```
+
+Set that directory's parent repo root as **`DEPLOY_REPO_ROOT`** in GitLab → Settings → CI/CD → Variables, then re-run the pipeline.
+
+Example: if the script is at `/home/g10xtestid/DSR-WSR-AUTOMATION/scripts/deploy-vm.sh`, set:
+
+`DEPLOY_REPO_ROOT` = `/home/g10xtestid/DSR-WSR-AUTOMATION`
+
+Ensure the clone contains the latest code (including `scripts/deploy-vm.sh`):
+
+```bash
+cd /home/g10xtestid/DSR-WSR-AUTOMATION
+git pull origin master
+chmod +x scripts/deploy-vm.sh
+```
 
 ## Notes
 

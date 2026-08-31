@@ -2,8 +2,12 @@
 # Requires a project runner tagged `dsr-wsr-vm` on the VM.
 #
 # Set in GitLab → Settings → CI/CD → Variables (optional):
+#   DEPLOY_REPO_ROOT     — absolute path to the app clone on the VM (required)
 #   DEPLOY_USER          — Linux user on VM (default: g10xtestid)
 #   DEPLOY_ENVIRONMENT_URL — e.g. http://35.x.x.x
+#
+# GIT_STRATEGY: none — we do NOT use GitLab's ephemeral checkout. The shell runner
+# invokes scripts/deploy-vm.sh from the permanent clone on the VM (git pull there).
 
 stages:
   - deploy
@@ -11,6 +15,8 @@ stages:
 variables:
   GIT_STRATEGY: none
   DEPLOY_USER: g10xtestid
+  # Override in GitLab CI/CD variables if your clone lives elsewhere on the VM.
+  DEPLOY_REPO_ROOT: /home/g10xtestid/DSR-WSR-AUTOMATION
 
 deploy_production:
   stage: deploy
@@ -19,7 +25,16 @@ deploy_production:
   rules:
     - if: $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "main"
   script:
-    - bash scripts/deploy-vm.sh
+    - |
+      DEPLOY_SCRIPT="${DEPLOY_REPO_ROOT}/scripts/deploy-vm.sh"
+      if [ ! -f "$DEPLOY_SCRIPT" ]; then
+        echo "ERROR: $DEPLOY_SCRIPT not found."
+        echo "Set DEPLOY_REPO_ROOT in GitLab → Settings → CI/CD → Variables"
+        echo "to the directory where you cloned this repo on the VM, e.g.:"
+        echo "  /home/g10xtestid/DSR-WSR-AUTOMATION"
+        exit 1
+      fi
+      bash "$DEPLOY_SCRIPT"
   environment:
     name: production
     url: $DEPLOY_ENVIRONMENT_URL
