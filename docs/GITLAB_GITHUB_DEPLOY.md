@@ -70,11 +70,17 @@ git push GitHub (master/main)
 ## Manual test
 
 ```bash
-curl --fail -X POST \
-  --form "token=YOUR_TRIGGER_TOKEN" \
-  --form "ref=master" \
-  "https://gitlab.com/api/v4/projects/YOUR_PROJECT_ID/trigger/pipeline"
+export GITLAB_PROJECT_ID="YOUR_PROJECT_ID"
+export GITLAB_TRIGGER_TOKEN="YOUR_TRIGGER_TOKEN"
+export GIT_REF="master"
+bash scripts/test-gitlab-trigger.sh
 ```
+
+## End-to-end smoke test (push)
+
+1. Edit `TRIGGER_TEST.md` (change the `updated:` line).
+2. Commit and push to GitHub `master`/`main`.
+3. Verify GitHub Action, GitLab pipeline, and on VM: `git log -1 TRIGGER_TEST.md`.
 
 ## Notes
 
