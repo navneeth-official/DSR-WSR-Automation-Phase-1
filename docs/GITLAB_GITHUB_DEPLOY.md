@@ -154,6 +154,39 @@ sudo -u g10xtestid sudo systemctl status dsr-wsr-api --no-pager
 
 Both commands must succeed without prompting for a password.
 
+### `password authentication failed for user "postgres"` (Alembic)
+
+The backend `.env` file is missing or still uses example credentials. Alembic then falls back to `postgres:postgres` (see `app/config.py`).
+
+On the VM:
+
+```bash
+BACKEND=~/DSR-WSR-AUTOMATION/DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation
+ls -la "$BACKEND/.env"
+```
+
+Create or fix `.env` (use the `dsr_user` password from Postgres bootstrap):
+
+```bash
+nano "$BACKEND/.env"
+```
+
+```env
+DATABASE_URL=postgresql://dsr_user:YOUR_PASSWORD@localhost:5432/dsr_wsr_db
+GEMINI_API_KEY=your-key
+```
+
+Test before retrying CI:
+
+```bash
+cd "$BACKEND"
+source .venv/bin/activate
+python -c "from app.database import engine; engine.connect(); print('DB OK')"
+python -m alembic upgrade head
+```
+
+If you forgot `dsr_user` password: `sudo -u postgres psql` → `ALTER USER dsr_user WITH PASSWORD 'newpassword';`
+
 ## Notes
 
 - `.env` and Google OAuth files stay on the VM only (gitignored); deploy does not remove them.

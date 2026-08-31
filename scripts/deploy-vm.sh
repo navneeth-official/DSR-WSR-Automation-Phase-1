@@ -36,6 +36,12 @@ git pull origin "$BRANCH"
 
 # Backend
 cd "$BACKEND"
+if [ ! -f .env ]; then
+  echo "ERROR: $BACKEND/.env is missing."
+  echo "Create it on the VM (gitignored). Example:"
+  echo "  DATABASE_URL=postgresql://dsr_user:YOUR_PASSWORD@localhost:5432/dsr_wsr_db"
+  exit 1
+fi
 if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
