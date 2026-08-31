@@ -37,11 +37,41 @@ No Docker. Push to GitHub triggers GitLab; a **shell runner on the VM** runs `sc
 - Clone repo (same layout as this monorepo root).
 - Install GitLab Runner (**shell** executor, tag `dsr-wsr-vm`).
 - GitHub deploy key on VM for `git pull`.
-- `sudo visudo` — allow `gitlab-runner` to run deploy as `DEPLOY_USER` and restart services.
+- **Passwordless sudo** for the deploy script (see below).
 
 ```bash
 chmod +x scripts/deploy-vm.sh
 ```
+
+#### Sudo for GitLab Runner (required)
+
+The job runs as `gitlab-runner`. `deploy-vm.sh` first does `sudo -u g10xtestid`, then as `g10xtestid` runs `sudo systemctl`, `sudo cp`, etc. Both need NOPASSWD rules.
+
+On the VM, create `/etc/sudoers.d/gitlab-runner-deploy`:
+
+```bash
+sudo visudo -f /etc/sudoers.d/gitlab-runner-deploy
+```
+
+Paste (replace `g10xtestid` if you use a different `DEPLOY_USER`):
+
+```sudoers
+# GitLab shell runner → re-exec deploy script as app owner
+gitlab-runner ALL=(g10xtestid) NOPASSWD: ALL
+
+# App owner → restart API, publish static files to nginx
+g10xtestid ALL=(ALL) NOPASSWD: /usr/bin/systemctl, /bin/systemctl, /usr/bin/mkdir, /bin/mkdir, /usr/bin/cp, /bin/cp, /usr/bin/chown, /bin/chown, /usr/bin/rm, /bin/rm
+```
+
+Save, then validate:
+
+```bash
+sudo visudo -c
+sudo -u gitlab-runner sudo -u g10xtestid whoami   # should print: g10xtestid
+sudo -u g10xtestid sudo systemctl status dsr-wsr-api --no-pager
+```
+
+**Alternative:** run the shell runner as `g10xtestid` — in `/etc/gitlab-runner/config.toml` add `user = "g10xtestid"` under your runner, then `sudo gitlab-runner restart`. You still need the second sudoers line for `g10xtestid`.
 
 Runner register example:
 
@@ -108,6 +138,21 @@ cd /home/g10xtestid/DSR-WSR-AUTOMATION
 git pull origin master
 chmod +x scripts/deploy-vm.sh
 ```
+
+### `sudo: a password is required`
+
+GitLab Runner jobs run as `gitlab-runner`. The deploy script calls `sudo -u g10xtestid` and later `sudo systemctl` / `sudo cp` — all must be passwordless.
+
+Follow **Sudo for GitLab Runner** in section 3 above, then retry the pipeline.
+
+Quick test on the VM:
+
+```bash
+sudo -u gitlab-runner sudo -u g10xtestid whoami
+sudo -u g10xtestid sudo systemctl status dsr-wsr-api --no-pager
+```
+
+Both commands must succeed without prompting for a password.
 
 ## Notes
 
