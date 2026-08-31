@@ -34,7 +34,7 @@ No Docker. Push to GitHub triggers GitLab; a **shell runner on the VM** runs `sc
 ### 3. GCP VM
 
 - Bootstrap app (Postgres, `.env`, systemd `dsr-wsr-api`, nginx, Node 20).
-- **Slide previews:** `sudo apt install -y libreoffice-impress poppler-utils` and `PPT_RENDER_BACKEND=libreoffice` in `.env` (see `docs/WSR_SLIDE_PREVIEW_LINUX.md`).
+- **Slide previews (production):** use `PPT_RENDER_BACKEND=remote` with a Windows COM render host — see `docs/WSR_SLIDE_PREVIEW.md`. LibreOffice is fallback only (font/layout drift).
 - Clone repo (same layout as this monorepo root).
 - Install GitLab Runner (**shell** executor, tag `dsr-wsr-vm`).
 - GitHub deploy key on VM for `git pull`.
@@ -250,4 +250,4 @@ Then retry the GitLab pipeline.
 
 - `.env` and Google OAuth files stay on the VM only (gitignored); deploy does not remove them.
 - If the VM clone lives under a extra folder (e.g. `DSR-WSR-Automation-Phase-1`), clone this repo root **inside** that folder or adjust paths in `deploy-vm.sh`.
-- Slide previews on Linux: see `docs/WSR_SLIDE_PREVIEW_LINUX.md` (`libreoffice-impress`, `poppler-utils`, `PPT_RENDER_BACKEND=libreoffice`).
+- Slide previews: see `docs/WSR_SLIDE_PREVIEW.md` (recommended: **remote** Windows COM server; LibreOffice is low-fidelity fallback).

@@ -65,10 +65,15 @@ class Settings:
         "GOOGLE_DRIVE_UPLOAD_ENABLED", ""
     ).lower() in ("1", "true", "yes")
 
-    # Slide preview export: auto | com | libreoffice
+    # Slide preview export: auto | com | remote | libreoffice
     ppt_render_backend: str = os.getenv("PPT_RENDER_BACKEND", "auto")
     libreoffice_path: str = os.getenv("LIBREOFFICE_PATH", "")
     pdftoppm_path: str = os.getenv("PDFTOPPM_PATH", "")
+    ppt_render_remote_url: str = os.getenv("PPT_RENDER_REMOTE_URL", "")
+    ppt_render_remote_token: str = os.getenv("PPT_RENDER_REMOTE_TOKEN", "")
+    ppt_render_remote_timeout_sec: int = int(
+        os.getenv("PPT_RENDER_REMOTE_TIMEOUT_SEC", "300")
+    )
 
 
 @lru_cache
