@@ -11,6 +11,7 @@ from pptx.oxml.ns import qn
 from app.services.ppt_logo_sync import sync_header_pictures_from_reference
 from app.services.ppt_shape_utils import find_title_shape
 from app.wsr_engine.models import ProjectContent, ProjectMap, TitleFormat
+from app.services.template_content_filler import set_delivery_title_from_template
 from app.wsr_engine.slide_ops import clear_slide_shapes, copy_shapes_to_slide, move_slide_after
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,10 @@ def provision_project_slides(
     aliases = dict(aliases or {})
     prototype_slide = prs.slides[prototype_idx]
     ref_title = find_title_shape(prototype_slide)
+    # Snapshot title XML before any {Track Name} substitution so clones stay templated.
+    title_para_templates = [
+        copy.deepcopy(p._p) for p in ref_title.text_frame.paragraphs
+    ]
     project_maps: list[ProjectMap] = []
 
     for idx, content in enumerate(content_projects):
@@ -97,7 +102,12 @@ def provision_project_slides(
             slide_idx = insert_after + 1
             slide = prs.slides[slide_idx]
 
-        set_delivery_title(slide, display_name, title_format, ref_title)
+        set_delivery_title_from_template(
+            slide,
+            display_name,
+            ref_title,
+            title_paragraph_templates=title_para_templates,
+        )
         project_maps.append(ProjectMap(project_name=display_name, main_slide_index=slide_idx))
         logger.info("Provisioned delivery slide %d -> %s", slide_idx, display_name)
 

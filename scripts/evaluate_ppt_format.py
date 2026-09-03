@@ -1,13 +1,23 @@
 """
-Evaluate a delivery-status PowerPoint deck against the G10X template rulebook.
+Unified WSR deck evaluation against a template in templates/.
 
-Hybrid evaluation (default): deterministic geometry + visual AI review.
-Reports are saved under output/ by default (JSON + text document).
+One command covers:
+  - Typography vs template (font, size, bold, line spacing)
+  - Bullet format (category headers, story bullets)
+  - HL/KA container waste (top, bottom, under-utilization)
+  - Layout geometry (footer, HL–KA gap, overlap)
+  - Visual AI review (default full mode; skip with --no-visual)
+
+Outputs (default, under output/):
+  - <deck>.format_eval.txt / .json     — business-readable score + per-slide summary
+  - <deck>.format_eval.internal.json   — developer metrics
+  - validation_report.md / .json       — CI-style checklist (typography + layout + waste)
+  - validation/*.png                   — annotated slides (with --annotate)
 
 Usage:
     python scripts/evaluate_ppt_format.py --ppt output/HEB_Delivery_Status.pptx
-    python scripts/evaluate_ppt_format.py --ppt output/HEB_Delivery_Status.pptx --mode deterministic
-    python scripts/evaluate_ppt_format.py --ppt output/HEB_Delivery_Status.pptx --no-visual
+    python scripts/evaluate_ppt_format.py --ppt output/HEB_Delivery_Status.pptx --annotate
+    python scripts/evaluate_ppt_format.py --ppt output/HEB_Delivery_Status.pptx --mode deterministic --no-visual
 """
 
 from __future__ import annotations
@@ -23,13 +33,17 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from app.paths import (  # noqa: E402
     DEFAULT_CONTENT_JSON,
+    GENERIC_WSR_TEMPLATE,
     evaluation_ai_report_paths,
     evaluation_report_paths,
 )
+from app.services.ppt_format_reference import resolve_evaluation_template  # noqa: E402
 from app.services.ppt_format_report import (  # noqa: E402
     DeckFormatReport,
+    annotate_evaluation_report,
     evaluate_ppt_format,
     save_evaluation_reports,
+    write_validation_companion_reports,
 )
 from app.services.ppt_format_user_report import format_evaluation_for_terminal  # noqa: E402
 
@@ -65,14 +79,22 @@ def _print_saved_report_paths(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Hybrid G10X delivery-status deck evaluation: "
-            "deterministic geometry (source of truth) + visual AI quality review."
+            "Unified WSR deck evaluation: template typography & bullets, HL/KA container "
+            "waste, layout geometry, and optional visual AI review — one command."
         )
     )
     parser.add_argument(
         "--ppt",
         required=True,
         help="Path to .pptx deck (e.g. output/HEB_Delivery_Status.pptx)",
+    )
+    parser.add_argument(
+        "--template",
+        default="",
+        help=(
+            "Reference WSR template .pptx in templates/ "
+            f"(default: {GENERIC_WSR_TEMPLATE.name} when present, else newest template)"
+        ),
     )
     parser.add_argument(
         "--content",
@@ -136,6 +158,14 @@ def main() -> None:
         help="Suppress raw vision API logs on the terminal (still written to vision_api_*.log)",
     )
     parser.add_argument(
+        "--annotate",
+        action="store_true",
+        help=(
+            "Export annotated PNGs for all deterministic findings "
+            "(typography, bullets, unused HL/KA space) under output/validation/"
+        ),
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Print developer report with rule IDs and measurements (default: user-facing report)",
@@ -145,6 +175,12 @@ def main() -> None:
     ppt_path = Path(args.ppt).resolve()
     if not ppt_path.is_file():
         print(f"Error: file not found: {ppt_path}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        template_path = resolve_evaluation_template(args.template or None)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
 
     content_json: Path | None
@@ -163,6 +199,7 @@ def main() -> None:
 
     report = evaluate_ppt_format(
         ppt_path,
+        template_path=template_path,
         mode=args.mode,
         content_json=content_json,
         scope_all_slides=args.all_slides,
@@ -175,6 +212,20 @@ def main() -> None:
 
     if args.no_save:
         print(terminal_text)
+        validation_json, validation_md = write_validation_companion_reports(
+            report,
+            ppt_path,
+            output_dir=ppt_path.parent,
+            content_json=content_json,
+        )
+        print(f"Validation report -> {validation_md}")
+        if args.annotate:
+            annotation_dir = annotate_evaluation_report(
+                report,
+                ppt_path,
+                output_dir=ppt_path.parent / "validation",
+            )
+            print(f"Annotated images: {annotation_dir}")
     else:
         default_json, default_report, default_internal = evaluation_report_paths(ppt_path)
         default_ai_json, default_ai_report = evaluation_ai_report_paths(ppt_path)
@@ -188,11 +239,19 @@ def main() -> None:
             ai_json_path=default_ai_json,
             ai_report_path=default_ai_report,
         )
+        validation_json, validation_md = write_validation_companion_reports(
+            report,
+            ppt_path,
+            output_dir=ppt_path.parent,
+            content_json=content_json,
+        )
         if args.verbose:
             print(terminal_text)
             print()
         else:
             _print_evaluation_summary(report)
+            if report.template_file:
+                print(f"Reference template: {report.template_file}")
         _print_saved_report_paths(
             report_path=report_path,
             json_path=json_path,
@@ -201,6 +260,15 @@ def main() -> None:
             ai_json_path=default_ai_json,
             include_visual=include_visual,
         )
+        print(f"  Validation MD   -> {validation_md}")
+        print(f"  Validation JSON -> {validation_json}")
+        if args.annotate:
+            annotation_dir = annotate_evaluation_report(
+                report,
+                ppt_path,
+                output_dir=ppt_path.parent / "validation",
+            )
+            print(f"  Annotated PNGs  -> {annotation_dir}")
 
     sys.exit(0 if report.deck_pass else 1)
 

@@ -18,6 +18,7 @@ _FAIL_RULE_IDS = frozenset({
     "HL-P-05",
     "HL-P-06",
     "HL-SPC-02",
+    "HL-SPC-03",
     "HL-SPC-04",
     "HL-WASTE-01",
     "HL-OVERFLOW-01",
@@ -39,12 +40,17 @@ _WARN_RULE_IDS = frozenset({
     "TITLE-02",
     "TITLE-03",
     "HL-SPC-01",
-    "HL-SPC-03",
     "HL-SIZE-01",
     "KA-SIZE-01",
     "KA-PLC-02",
     "KA-PLC-03",
     "KA-PLC-04",
+    "HL-TOP-WASTE-01",
+    "HL-BOTTOM-WASTE-01",
+    "HL-UTIL-01",
+    "KA-TOP-WASTE-01",
+    "KA-BOTTOM-WASTE-01",
+    "KA-UTIL-01",
 })
 
 

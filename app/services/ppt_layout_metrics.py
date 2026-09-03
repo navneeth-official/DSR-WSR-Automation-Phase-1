@@ -248,6 +248,53 @@ def count_ka_items(ka_shape) -> int:
     return sum(1 for p in content_cell.text_frame.paragraphs if p.text.strip())
 
 
+def hl_content_top_in(hl_shape) -> float:
+    """Top of the HL content cell inner area (below header rows, after top margin)."""
+    r0, r1 = hl_shape.table.rows[0].height, hl_shape.table.rows[1].height
+    mar_t, _ = cell_margins(hl_shape.table.cell(2, 0))
+    return round((hl_shape.top + r0 + r1 + mar_t) / EMU_PER_INCH, 4)
+
+
+def hl_waste_above_text_in_estimated(hl_shape) -> float:
+    """Empty HL content-cell area above the first visible bullet line."""
+    content_top_in = hl_content_top_in(hl_shape)
+    ref_r2 = hl_shape.table.rows[2].height
+    per_line_in = ref_r2 / EMU_PER_INCH / max(CANONICAL_PARA_SLOTS - 2, 1)
+    tx_body = hl_shape.table.cell(2, 0).text_frame._txBody
+    leading_blanks = 0
+    for p in tx_body.findall(qn("a:p")):
+        if paragraph_text(p).strip():
+            break
+        leading_blanks += 1
+    text_top_in = content_top_in + leading_blanks * per_line_in
+    return round(max(text_top_in - content_top_in, 0.0), 4)
+
+
+def ka_content_top_in(ka_shape) -> float:
+    """Top of the KA content cell inner area (below header row, after top margin)."""
+    r0 = ka_shape.table.rows[0].height
+    mar_t, _ = cell_margins(ka_shape.table.cell(1, 0))
+    return round((ka_shape.top + r0 + mar_t) / EMU_PER_INCH, 4)
+
+
+def ka_waste_above_text_in(ka_shape) -> float:
+    """Empty KA content-cell area above the first list item."""
+    if count_ka_items(ka_shape) == 0:
+        return 0.0
+    content_top_in = ka_content_top_in(ka_shape)
+    r0 = ka_shape.table.rows[0].height
+    mar_t, _ = cell_margins(ka_shape.table.cell(1, 0))
+    per_line_in = 50292 / EMU_PER_INCH
+    content_cell = ka_shape.table.cell(1, 0)
+    leading_blanks = 0
+    for p in content_cell.text_frame.paragraphs:
+        if p.text.strip():
+            break
+        leading_blanks += 1
+    text_top_in = content_top_in + leading_blanks * per_line_in
+    return round(max(text_top_in - content_top_in, 0.0), 4)
+
+
 def ka_waste_below_text_in(ka_shape) -> float:
     """Empty KA area below visible items (content-relative, not row-height coupled)."""
     items = count_ka_items(ka_shape)

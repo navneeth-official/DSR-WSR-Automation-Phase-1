@@ -106,7 +106,7 @@ def main() -> int:
         findings.append(
             {
                 "slide_index": v.get("slide_index"),
-                "slide_number": (v.get("slide_index") or 0) + 1,
+                "slide_number": v.get("slide_index"),
                 "slide_title": v.get("slide_title", ""),
                 "area": v.get("target") or v.get("category") or "layout",
                 "rule_id": v.get("rule_id", ""),

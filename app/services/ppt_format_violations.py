@@ -1,8 +1,7 @@
 """Deterministic spacing/layout violation detection for delivery-status slides.
 
-Rules follow visual-principles evaluation calibrated from the G10X WSR template:
-overlap and clipping are geometry-based on rendered content; whitespace and box
-height variations within template bands are acceptable.
+Rules compare ACTUAL slide metrics against EXPECTED values from the evaluation
+template (typography, calibrated layout bands, prototype HL/KA geometry).
 """
 
 from __future__ import annotations
@@ -15,8 +14,17 @@ from app.services.ppt_layout_metrics import (
     DEFAULT_EMPTY_KA_HEIGHT_IN,
     HL_KA_TARGET_BORDER_GAP_IN,
 )
+from app.services.hl_waste_limits import (
+    container_waste_report_limit,
+    hl_bottom_waste_in,
+    hl_waste_limit,
+    should_report_container_waste,
+)
 from app.services.template_calibration import TemplateLayoutThresholds, load_thresholds
+from app.services.template_layout_compare import detect_template_layout_deviations
+from app.services.template_layout_spec import TemplateLayoutSpec
 from app.services.template_typography import TemplateTypographySpec
+from app.services.template_spacing_spec import TemplateSpacingSpec
 
 
 def _service_base_title(title: str) -> str:
@@ -54,13 +62,16 @@ def _contd_hl_oversized(
     """
     if not _is_contd_hl_slide(slide):
         return False
-    waste = slide.get("hl_waste_below_text_in")
+    waste = hl_bottom_waste_in(slide)
     if waste is None:
         return False
-    return float(waste) > thresholds.hl_waste_contd_hl_max_in
+    return should_report_container_waste(waste, thresholds.hl_waste_contd_hl_max_in)
 
 
-def _hl_room_below_table_to_footer(slide: dict[str, Any]) -> float | None:
+def _hl_room_below_table_to_footer(
+    slide: dict[str, Any],
+    thresholds: TemplateLayoutThresholds,
+) -> float | None:
     """White space on slide below the HL table border (not inside the gray box)."""
     bottom = slide.get("hl_bottom_measured_in")
     if bottom is None:
@@ -68,7 +79,7 @@ def _hl_room_below_table_to_footer(slide: dict[str, Any]) -> float | None:
         bottom = hl.get("position_in", {}).get("bottom")
     if bottom is None:
         return None
-    limit = load_thresholds().footer_content_max_bottom_in
+    limit = thresholds.footer_content_max_bottom_in
     return round(max(limit - float(bottom), 0), 4)
 
 
@@ -76,21 +87,7 @@ def _hl_waste_limit(
     slide: dict[str, Any],
     thresholds: TemplateLayoutThresholds,
 ) -> float:
-    """
-    Calibrated internal-waste band from measured layout, not slide labels.
-
-    Dense-fill slides (high effective utilization) use a tight band.
-    Sparse HL with a Key Activities section uses the wider template band.
-    Continuation HL slides use the relaxed contd band.
-    """
-    if _is_contd_hl_slide(slide):
-        return thresholds.hl_waste_contd_hl_max_in
-    hl = slide.get("highlights") or {}
-    if _is_hl_dense_fill(hl, thresholds):
-        return thresholds.hl_waste_dense_fill_max_in
-    if slide.get("key_activities") is not None:
-        return thresholds.hl_waste_sparse_ka_max_in
-    return thresholds.hl_waste_dense_fill_max_in
+    return hl_waste_limit(slide, thresholds)
 
 
 def _excessive_hl_ka_spacing(
@@ -125,11 +122,11 @@ def _hl_internal_waste_excessive(
     slide: dict[str, Any],
     thresholds: TemplateLayoutThresholds,
 ) -> bool:
-    """Empty gray inside HL box below last bullet, above calibrated reference band."""
-    waste = slide.get("hl_waste_below_text_in")
+    """HL box extended only when bottom empty space exceeds the template band."""
+    waste = hl_bottom_waste_in(slide)
     if waste is None:
         return False
-    return waste > _hl_waste_limit(slide, thresholds)
+    return should_report_container_waste(waste, _hl_waste_limit(slide, thresholds))
 
 
 def _sparse_hl_with_ka_oversized(
@@ -148,8 +145,13 @@ def _sparse_hl_with_ka_oversized(
     return _hl_internal_waste_excessive(slide, thresholds)
 
 
-def compute_service_chains(slides: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def compute_service_chains(
+    slides: list[dict[str, Any]],
+    *,
+    thresholds: TemplateLayoutThresholds | None = None,
+) -> list[dict[str, Any]]:
     """Per-service slide grouping for contextual AI review (not threshold selection)."""
+    thresholds = thresholds or load_thresholds()
     by_service: dict[str, dict[str, Any]] = {}
     for slide in slides:
         base = _service_base_title(slide.get("title", ""))
@@ -180,7 +182,7 @@ def compute_service_chains(slides: list[dict[str, Any]]) -> list[dict[str, Any]]
             "main_hl_effective_util": hl.get("effective_utilization_ratio"),
             "main_hl_visual_lines": hl.get("visual_line_count"),
             "main_hl_waste_below_text_in": main.get("hl_waste_below_text_in"),
-            "main_hl_room_below_table_in": _hl_room_below_table_to_footer(main),
+            "main_hl_room_below_table_in": _hl_room_below_table_to_footer(main, thresholds),
             "contd_hl_slide_indices": [s.get("slide_index") for s in contd_hl],
             "ka_only_contd_slide_index": (
                 contd_ka.get("slide_index") if contd_ka else None
@@ -260,10 +262,10 @@ def _hl_visually_unbalanced(hl: dict[str, Any], slide: dict[str, Any], threshold
     util = _hl_effective_util(hl)
     if util is None or util >= thresholds.hl_waste_stretch_max_util:
         return False
-    waste = slide.get("hl_waste_below_text_in")
+    waste = hl_bottom_waste_in(slide)
     if waste is None:
         return False
-    return waste > thresholds.hl_waste_extreme_in
+    return should_report_container_waste(waste, thresholds.hl_waste_extreme_in)
 
 
 def _ka_visually_unbalanced(ka: dict[str, Any], slide: dict[str, Any], thresholds: TemplateLayoutThresholds) -> bool:
@@ -276,7 +278,7 @@ def _ka_visually_unbalanced(ka: dict[str, Any], slide: dict[str, Any], threshold
     waste = slide.get("ka_waste_below_text_in")
     if waste is None:
         return False
-    return waste > thresholds.ka_waste_extreme_in
+    return should_report_container_waste(waste, thresholds.ka_waste_extreme_in)
 
 
 def detect_slide_violations(
@@ -284,6 +286,8 @@ def detect_slide_violations(
     *,
     thresholds: TemplateLayoutThresholds | None = None,
     typography: TemplateTypographySpec | None = None,
+    spacing: TemplateSpacingSpec | None = None,
+    layout_spec: TemplateLayoutSpec | None = None,
     ka_placement_terminal_indices: frozenset[int] | None = None,
 ) -> list[dict[str, Any]]:
     """Return violation dicts for one extracted slide."""
@@ -313,6 +317,7 @@ def detect_slide_violations(
                 slide_index=idx,
                 title=title,
                 typography=typography,
+                spacing=spacing,
             )
         )
 
@@ -322,7 +327,10 @@ def detect_slide_violations(
                 "severity": "critical",
                 "slide_index": idx,
                 "title": title,
-                "message": "Category headers use wrong bullet (must be Wingdings Ø at level 7)",
+                "message": (
+                    "Category headers use wrong bullet "
+                    "(must match template category bullet format)"
+                ),
                 "details": hl["category_bullet_violations"],
             })
 
@@ -407,7 +415,7 @@ def detect_slide_violations(
 
         if _contd_hl_oversized(slide, thresholds):
             waste = slide.get("hl_waste_below_text_in")
-            limit = thresholds.hl_waste_contd_hl_max_in
+            limit = container_waste_report_limit(thresholds.hl_waste_contd_hl_max_in)
             violations.append({
                 "rule_id": "CONT-HL-01",
                 "severity": "major",
@@ -484,6 +492,28 @@ def detect_slide_violations(
             ),
         })
 
+    existing_rule_ids = {str(v.get("rule_id")) for v in violations}
+    for layout_violation in detect_template_layout_deviations(
+        slide,
+        layout_spec=layout_spec,
+    ):
+        rule_id = str(layout_violation.get("rule_id") or "")
+        if rule_id in existing_rule_ids:
+            continue
+        violations.append(layout_violation)
+        existing_rule_ids.add(rule_id)
+
+    from app.services.container_space_violations import detect_container_space_violations
+
+    for space_violation in detect_container_space_violations(slide, thresholds=thresholds):
+        rule_id = str(space_violation.get("rule_id") or "")
+        if rule_id == "HL-BOTTOM-WASTE-01" and "HL-WASTE-01" in existing_rule_ids:
+            continue
+        if rule_id in existing_rule_ids:
+            continue
+        violations.append(space_violation)
+        existing_rule_ids.add(rule_id)
+
     return violations
 
 
@@ -494,6 +524,8 @@ def detect_deck_violations(
     scope_all_slides: bool = False,
     thresholds: TemplateLayoutThresholds | None = None,
     typography: TemplateTypographySpec | None = None,
+    spacing: TemplateSpacingSpec | None = None,
+    layout_spec: TemplateLayoutSpec | None = None,
 ) -> dict[str, Any]:
     """Detect violations across deck using per-slide layout measurements."""
     thresholds = thresholds or load_thresholds()
@@ -507,7 +539,7 @@ def detect_deck_violations(
         slides = [s for s in slides if in_scope(s.get("title", ""))]
 
     all_violations: list[dict[str, Any]] = []
-    chains = compute_service_chains(slides)
+    chains = compute_service_chains(slides, thresholds=thresholds)
     ka_terminal = terminal_slide_indices_for_chains(chains)
     for slide in slides:
         all_violations.extend(
@@ -515,6 +547,8 @@ def detect_deck_violations(
                 slide,
                 thresholds=thresholds,
                 typography=typography,
+                spacing=spacing,
+                layout_spec=layout_spec,
                 ka_placement_terminal_indices=ka_terminal,
             )
         )

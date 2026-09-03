@@ -13,6 +13,7 @@ from pptx import Presentation
 from pptx.oxml.ns import qn
 
 from app.services.ppt_format_fix_planner import ALLOWED_ACTIONS
+from app.services.template_label_spec import TemplateLabelSpec, classify_paragraphs
 from app.services.ppt_layout_metrics import EMU_PER_INCH, hl_ka_tab_gap_emu
 
 from app.paths import G10X_TEMPLATE, PPT_BUILDER, REPO_ROOT, SCRIPTS_DIR
@@ -50,25 +51,10 @@ def _paragraph_text(p_elem) -> str:
     return "".join(n.text or "" for n in p_elem.iter() if n.tag.endswith("}t"))
 
 
-def _classify_role(text: str, level: int) -> str:
-    if not text.strip():
-        return "blank"
-    low = text.lower()
-    if low == "current week sprint status":
-        return "current_week"
-    if text.startswith("Sprint") or text.startswith("sprint"):
-        return "sprint_line"
-    if "stories completed this week" in low:
-        return "category_completed"
-    if "released for partner review" in low:
-        return "category_released"
-    if "in-progress this week" in low or "in progress this week" in low:
-        return "category_inprogress"
-    if level == 7:
-        return "category_other"
-    if level == 1:
-        return "story_item"
-    return "other"
+def _classify_role(text: str, level: int, label_spec: TemplateLabelSpec | None = None) -> str:
+    paras = [{"text": text, "level": level, "bullet_font": ""}]
+    classify_paragraphs(paras, label_spec)
+    return paras[0].get("role", "other")
 
 
 def _para_level(p_elem) -> int:

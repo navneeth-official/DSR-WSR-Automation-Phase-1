@@ -50,24 +50,28 @@ class SprintSection:
     completed: list[str]
     released: list[str]
     inprogress: list[str]
+    sprint_start_date: str | None = None
+    sprint_end_date: str | None = None
     continued_section: bool = False
     omit_category_headers: list[str] = field(default_factory=list)
 
     def to_display_dict(self) -> dict[str, Any]:
-        total = len(self.completed) + len(self.released) + len(self.inprogress)
+        """Raw section payload for overflow planning and template-driven fill."""
         return {
-            "sprint_bold": f"Sprint \u2013 {self.sprint_name}, {self.sprint_status} ",
-            "sprint_light": (
-                f"({self.sprint_dates}) Stories (Total \u2013 {total}, "
-                f"Done \u2013 {len(self.completed)}, In-review \u2013 {len(self.released)}, "
-                f"In-progress \u2013 {len(self.inprogress)})"
-            ),
+            "sprint_name": self.sprint_name,
+            "sprint_dates": self.sprint_dates,
+            "sprint_status": self.sprint_status,
+            "sprint_start_date": self.sprint_start_date,
+            "sprint_end_date": self.sprint_end_date,
+            "completed": list(self.completed),
+            "released": list(self.released),
+            "inprogress": list(self.inprogress),
             "completed_count": str(len(self.completed)),
-            "completed_items": self.completed,
+            "completed_items": list(self.completed),
             "released_count": str(len(self.released)),
-            "released_items": self.released,
+            "released_items": list(self.released),
             "inprogress_count": str(len(self.inprogress)),
-            "inprogress_items": self.inprogress,
+            "inprogress_items": list(self.inprogress),
             "continued_section": self.continued_section,
             "omit_category_headers": list(self.omit_category_headers),
         }

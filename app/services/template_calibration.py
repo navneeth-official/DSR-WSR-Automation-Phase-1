@@ -47,6 +47,11 @@ class TemplateLayoutThresholds:
     hl_ka_border_gap_max_in: float = 0.33
     hl_dense_fill_min_effective_util: float = UTILIZATION_THRESHOLD
     footer_text_min_margin_in: float = 0.15
+    hl_waste_above_text_max_in: float = 0.15
+    ka_waste_above_text_max_in: float = 0.15
+    ka_waste_below_text_max_in: float = 0.25
+    container_underutilization_max_util: float = 0.55
+    container_combined_waste_min_in: float = 0.35
     template_file: str = ""
     calibrated_slide_count: int = 0
     calibration_notes: tuple[str, ...] = field(default_factory=tuple)
@@ -81,6 +86,11 @@ class TemplateLayoutThresholds:
             "hl_ka_border_gap_max_in": self.hl_ka_border_gap_max_in,
             "hl_dense_fill_min_effective_util": self.hl_dense_fill_min_effective_util,
             "footer_text_min_margin_in": self.footer_text_min_margin_in,
+            "hl_waste_above_text_max_in": self.hl_waste_above_text_max_in,
+            "ka_waste_above_text_max_in": self.ka_waste_above_text_max_in,
+            "ka_waste_below_text_max_in": self.ka_waste_below_text_max_in,
+            "container_underutilization_max_util": self.container_underutilization_max_util,
+            "container_combined_waste_min_in": self.container_combined_waste_min_in,
             "template_file": self.template_file,
             "calibrated_slide_count": self.calibrated_slide_count,
             "calibration_notes": list(self.calibration_notes),
@@ -155,10 +165,33 @@ def analyze_deck_for_calibration(deck_data: dict[str, Any]) -> dict[str, Any]:
     gaps = collect("hl_ka_gap_in")
     clearances = collect("text_ka_clearance_in")
     ka_wastes = collect("ka_waste_below_text_in")
+    hl_waste_above = collect("hl_waste_above_text_in")
+    ka_waste_above = collect("ka_waste_above_text_in")
     utils = [
         float(s["highlights"]["effective_utilization_ratio"])
         for s in slides
         if s["highlights"].get("effective_utilization_ratio") is not None
+    ]
+    ka_utils = [
+        float(s["key_activities"]["utilization_ratio"])
+        for s in slides
+        if s.get("key_activities", {}).get("utilization_ratio") is not None
+    ]
+
+    def combined_waste(prefix: str, slide: dict[str, Any]) -> float | None:
+        above = slide.get(f"{prefix}_waste_above_text_in")
+        below = slide.get(f"{prefix}_waste_below_text_in")
+        box = slide.get(f"{prefix}_box_unused_in")
+        parts = [float(v) for v in (above, below, box) if v is not None]
+        if not parts:
+            return None
+        return round(sum(parts), 4)
+
+    combined_hl = [w for w in (combined_waste("hl", s) for s in slides) if w is not None]
+    combined_ka = [
+        w
+        for w in (combined_waste("ka", s) for s in slides if s.get("key_activities"))
+        if w is not None
     ]
 
     dense_wastes = hl_wastes(dense_fill)
@@ -171,10 +204,15 @@ def analyze_deck_for_calibration(deck_data: dict[str, Any]) -> dict[str, Any]:
         "hl_waste_all": hl_wastes(slides),
         "hl_waste_dense_fill": dense_wastes,
         "hl_waste_sparse_hl_ka": sparse_wastes,
+        "hl_waste_above": hl_waste_above,
+        "ka_waste_above": ka_waste_above,
         "hl_ka_gap": gaps,
         "text_ka_clearance": clearances,
         "ka_waste": ka_wastes,
         "effective_util": utils,
+        "ka_util": ka_utils,
+        "combined_hl_waste": combined_hl,
+        "combined_ka_waste": combined_ka,
         "rendered_text_bottom": text_bottoms,
         "hl_table_bottom": hl_bottoms,
     }
@@ -203,13 +241,25 @@ def calibrate_from_deck(deck_data: dict[str, Any]) -> TemplateLayoutThresholds:
     gap_max = max(gaps) if gaps else gap_p50
     clr_p95 = _percentile(clearances, 0.95) if clearances else 1.5
     ka_waste_p95 = _percentile(ka_wastes, 0.95) if ka_wastes else 0.0
+    hl_above_p95 = _percentile(stats["hl_waste_above"], 0.95) if stats["hl_waste_above"] else 0.08
+    ka_above_p95 = _percentile(stats["ka_waste_above"], 0.95) if stats["ka_waste_above"] else 0.08
+    ka_below_p95 = ka_waste_p95
+    util_p25 = _percentile(stats["effective_util"], 0.25) if stats["effective_util"] else 0.55
+    combined_hl_p75 = (
+        _percentile(stats["combined_hl_waste"], 0.75) if stats["combined_hl_waste"] else 0.35
+    )
+    min_clearance = min(clearances) if clearances else 0.15
 
     hl_waste_dense_fill_max = round(max(dense_p95 + 0.02, 0.10), 4)
     hl_waste_sparse_ka_max = round(max(sparse_p95 + 0.05, 0.5), 4)
     hl_ka_target = round(gap_p50, 4)
     hl_ka_max = round(max(gap_max + 0.02, hl_ka_target + 0.02), 4)
 
-    reference_footer_in = 6.29
+    reference_footer_in = (
+        max(stats["hl_table_bottom"])
+        if stats["hl_table_bottom"]
+        else (max(text_bottoms) if text_bottoms else 6.29)
+    )
     max_text_bottom = max(text_bottoms) if text_bottoms else reference_footer_in
     text_margins = [
         reference_footer_in - t for t in text_bottoms if t <= reference_footer_in + 0.01
@@ -238,9 +288,25 @@ def calibrate_from_deck(deck_data: dict[str, Any]) -> TemplateLayoutThresholds:
     notes.append(
         f"Footer: max text bottom {max_text_bottom:.4f} in, min margin {min_margin:.4f} in → limit {footer_max:.4f} in"
     )
+    hl_waste_above_max = round(max(hl_above_p95 + 0.02, 0.05), 4)
+    ka_waste_above_max = round(max(ka_above_p95 + 0.02, 0.05), 4)
+    ka_waste_below_max = round(max(ka_below_p95 + 0.02, 0.08), 4)
+    underutil_max = round(max(util_p25 - 0.08, 0.30), 2)
+    combined_waste_min = round(max(combined_hl_p75 * 0.85, 0.15), 4)
+    min_text_ka_clearance = round(max(min_clearance * 0.85, 0.08), 4)
+
+    notes.append(
+        f"HL top waste p95={hl_above_p95:.4f} in → max acceptable {hl_waste_above_max:.4f} in"
+    )
+    notes.append(
+        f"KA top waste p95={ka_above_p95:.4f} in → max acceptable {ka_waste_above_max:.4f} in"
+    )
+    notes.append(
+        f"Under-utilization band: template p25 util {util_p25:.2f} → flag below {underutil_max:.2f}"
+    )
 
     return TemplateLayoutThresholds(
-        min_text_ka_clearance_in=0.15,
+        min_text_ka_clearance_in=min_text_ka_clearance,
         hl_text_overflow_tolerance_in=0.05,
         footer_content_max_bottom_in=footer_max,
         hl_waste_extreme_in=hl_waste_extreme,
@@ -256,6 +322,11 @@ def calibrate_from_deck(deck_data: dict[str, Any]) -> TemplateLayoutThresholds:
         hl_ka_border_gap_max_in=hl_ka_max,
         hl_dense_fill_min_effective_util=UTILIZATION_THRESHOLD,
         footer_text_min_margin_in=footer_min_margin,
+        hl_waste_above_text_max_in=hl_waste_above_max,
+        ka_waste_above_text_max_in=ka_waste_above_max,
+        ka_waste_below_text_max_in=ka_waste_below_max,
+        container_underutilization_max_util=underutil_max,
+        container_combined_waste_min_in=combined_waste_min,
         template_file=deck_data.get("file", TEMPLATE_PATH.name),
         calibrated_slide_count=int(stats["slide_count"]),
         calibration_notes=tuple(notes),

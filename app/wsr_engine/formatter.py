@@ -20,7 +20,11 @@ from app.services.ppt_shape_utils import (
     paragraph_text,
 )
 from app.services.template_profile import ParagraphRoles, ServiceProfile, TemplateProfile
-from app.wsr_engine.content_parser import section_display_content
+from app.services.template_block_spec import TemplateBlockSpec
+from app.services.template_content_filler import (
+    fill_highlights_cell as _fill_highlights_cell,
+    fill_highlights_contd_cell as _fill_highlights_contd_cell,
+)
 from app.wsr_engine.models import SprintSection
 from app.services.ppt_hl_bullets import (
     clear_story_line_text,
@@ -764,18 +768,22 @@ def clear_ka_on_project_slides(prs, project_name: str, template_slide=None, serv
 
 def fill_highlights_on_slide(
     slide,
-    section_tmpl: dict,
+    block_spec: TemplateBlockSpec,
     sections: list[dict],
+    *,
+    track_name: str = "",
 ) -> None:
     cell = highlights_content_cell(slide)
-    populate_highlights_cell(cell, section_tmpl, {"sections": sections})
+    _fill_highlights_cell(cell, block_spec, sections, track_name=track_name)
 
 
 def fill_contd_highlights_on_slide(
     slide,
-    section_tmpl: dict,
+    block_spec: TemplateBlockSpec,
     sections: list[dict],
+    *,
+    track_name: str = "",
 ) -> None:
     prepare_contd_slide_for_highlights(slide)
     cell = highlights_content_cell(slide)
-    populate_highlights_contd_cell(cell, section_tmpl, {"sections": sections})
+    _fill_highlights_contd_cell(cell, block_spec, sections, track_name=track_name)

@@ -13,6 +13,7 @@ from app.constants.ppt_bullets import (
     CATEGORY_HEADER_BULLET,
     CATEGORY_HEADER_BULLET_FONT,
     CATEGORY_HEADER_LEVEL,
+    CategoryBulletSpec,
     FORBIDDEN_CATEGORY_HEADER_BULLETS,
     is_valid_category_header_bullet,
 )
@@ -21,8 +22,12 @@ from app.services.ppt_layout_metrics import (
     CANONICAL_PARA_SLOTS,
     count_visual_lines_in_hl,
     effective_hl_utilization,
+    hl_content_top_in,
+    hl_waste_above_text_in_estimated,
     hl_waste_below_text_in,
+    ka_content_top_in,
     ka_rendered_text_bottom_in,
+    ka_waste_above_text_in,
     ka_waste_below_text_in,
     rendered_text_bottom_emu,
     text_ka_clearance_in,
@@ -34,18 +39,38 @@ from app.services.ppt_shape_utils import (
     is_ka_table,
     iter_all_shapes,
 )
+from app.services.template_label_spec import (
+    TemplateLabelSpec,
+    classify_paragraphs,
+    extract_template_label_spec,
+)
 
 EMU_PER_INCH = 914400
 
-from app.paths import G10X_TEMPLATE, SCRIPTS_DIR
+from app.paths import SCRIPTS_DIR
 
-_g10x_prs_cache = None
 _uds_module = None
+_reference_prs_cache: dict[str, Presentation] = {}
 
 
-def _uds_helpers():
+def _resolve_reference_template(reference_template: Path | None) -> Path:
+    if reference_template is not None:
+        path = Path(reference_template).resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Reference template not found: {path}")
+        return path
+    from app.services.ppt_format_reference import resolve_evaluation_template
+
+    return resolve_evaluation_template()
+
+
+def _uds_helpers(reference_template: Path | None = None):
     """Lazy-load builder layout helpers (shared text-bottom math with repair)."""
-    global _g10x_prs_cache, _uds_module
+    global _uds_module
+    ref_path = _resolve_reference_template(reference_template)
+    cache_key = str(ref_path)
+    if cache_key not in _reference_prs_cache:
+        _reference_prs_cache[cache_key] = Presentation(str(ref_path))
     if _uds_module is None:
         import sys
 
@@ -55,10 +80,7 @@ def _uds_helpers():
         import update_delivery_status as uds  # noqa: WPS433
 
         _uds_module = uds
-        from pptx import Presentation
-
-        _g10x_prs_cache = Presentation(str(G10X_TEMPLATE))
-    return _uds_module, _g10x_prs_cache
+    return _uds_module, _reference_prs_cache[cache_key]
 
 
 def _service_base_title(title: str) -> str:
@@ -80,6 +102,24 @@ def _emu_in(value: int | None) -> float | None:
 
 def _paragraph_text(p_elem) -> str:
     return "".join(n.text or "" for n in p_elem.iter() if n.tag.endswith("}t"))
+
+
+def _run_color_from_rpr(r_pr) -> str | None:
+    """Extract explicit run color as RRGGBB or scheme:name (theme colors)."""
+    if r_pr is None:
+        return None
+    solid = r_pr.find(qn("a:solidFill"))
+    if solid is None:
+        return None
+    srgb = solid.find(qn("a:srgbClr"))
+    if srgb is not None:
+        val = (srgb.get("val") or "").strip().upper()
+        return val or None
+    scheme = solid.find(qn("a:schemeClr"))
+    if scheme is not None:
+        val = (scheme.get("val") or "").strip().lower()
+        return f"scheme:{val}" if val else None
+    return None
 
 
 def _para_metrics(p_elem) -> dict[str, Any]:
@@ -117,6 +157,11 @@ def _para_metrics(p_elem) -> dict[str, Any]:
         if rPr is not None:
             if rPr.get("b") is not None:
                 run["bold"] = rPr.get("b") == "1"
+            if rPr.get("i") is not None:
+                run["italic"] = rPr.get("i") == "1"
+            color = _run_color_from_rpr(rPr)
+            if color is not None:
+                run["color"] = color
             sz_attr = rPr.get("sz")
             if sz_attr is not None:
                 run["size_pt"] = int(sz_attr) / 100
@@ -133,29 +178,18 @@ def _para_metrics(p_elem) -> dict[str, Any]:
     return info
 
 
-def _classify_paragraph(p: dict[str, Any]) -> str:
-    text = p.get("text", "")
-    if not text:
-        return "blank"
-    low = text.lower()
-    if low == "current week sprint status":
-        return "current_week"
-    if text.startswith("Sprint") or text.startswith("sprint"):
-        return "sprint_line"
-    if "stories completed this week" in low:
-        return "category_completed"
-    if "released for partner review" in low:
-        return "category_released"
-    if "in-progress this week" in low or "in progress this week" in low:
-        return "category_inprogress"
-    lvl = p.get("level", 0)
-    if lvl == 7:
-        return "category_other"
-    if lvl == 1:
-        return "story_item"
-    if lvl == 0 and p.get("bullet") in ("•", None) and text.isupper():
-        return "project_name"
-    return "other"
+def _resolve_label_spec(
+    label_spec: TemplateLabelSpec | None,
+    reference_template: Path | None,
+) -> TemplateLabelSpec | None:
+    if label_spec is not None:
+        return label_spec
+    if reference_template is None:
+        return None
+    try:
+        return extract_template_label_spec(reference_template)
+    except (FileNotFoundError, ValueError):
+        return None
 
 
 def _get_highlights_shape(slide):
@@ -179,7 +213,14 @@ def _title_shape(slide):
     return None
 
 
-def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
+def extract_slide(
+    slide,
+    slide_index: int,
+    *,
+    reference_template: Path | None = None,
+    category_bullet_spec: CategoryBulletSpec | None = None,
+    label_spec: TemplateLabelSpec | None = None,
+) -> dict[str, Any] | None:
     """Extract format metrics for one slide. Returns None if not a delivery-status slide."""
     title_shape = _title_shape(slide)
     if not title_shape:
@@ -202,11 +243,13 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
     hl = _get_highlights_shape(slide)
     ka = _get_ka_shape(slide)
 
+    ref_template = Path(reference_template).resolve() if reference_template else None
+
     if hl:
         cell = hl.table.cell(2, 0)
         paras = [_para_metrics(p) for p in cell.text_frame._txBody.findall(qn("a:p"))]
-        for p in paras:
-            p["role"] = _classify_paragraph(p)
+        resolved_labels = _resolve_label_spec(label_spec, ref_template)
+        classify_paragraphs(paras, resolved_labels)
 
         filled = [p for p in paras if p.get("text")]
         story_items = [p for p in paras if p.get("role") == "story_item"]
@@ -235,23 +278,33 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
                 break
 
         category_bullet_violations = []
-        for p in paras:
-            role = p.get("role", "")
-            if not role.startswith("category_"):
-                continue
-            bullet = p.get("bullet")
-            bullet_font = p.get("bullet_font")
-            level = p.get("level")
-            if not is_valid_category_header_bullet(bullet, bullet_font, level):
+        if category_bullet_spec is not None:
+            for p in paras:
+                role = p.get("role", "")
+                if not role.startswith("category_"):
+                    continue
+                bullet = p.get("bullet")
+                bullet_font = p.get("bullet_font")
+                level = p.get("level")
+                if is_valid_category_header_bullet(
+                    bullet,
+                    bullet_font,
+                    level,
+                    spec=category_bullet_spec,
+                ):
+                    continue
                 issue = "invalid_category_bullet"
                 if bullet in FORBIDDEN_CATEGORY_HEADER_BULLETS:
                     issue = "forbidden_bullet_char"
-                elif level != CATEGORY_HEADER_LEVEL:
+                elif level not in category_bullet_spec.levels:
                     issue = "wrong_level"
-                elif bullet != CATEGORY_HEADER_BULLET:
+                elif bullet not in category_bullet_spec.bullet_chars:
                     issue = "wrong_bullet_char"
-                elif not bullet_font or "Wingdings" not in bullet_font:
-                    issue = "missing_wingdings_font"
+                elif category_bullet_spec.bullet_fonts and (
+                    not bullet_font
+                    or not category_bullet_spec.matches(bullet, bullet_font, level)
+                ):
+                    issue = "wrong_bullet_font"
                 category_bullet_violations.append(
                     {
                         "role": role,
@@ -259,11 +312,8 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
                         "level": level,
                         "bullet": bullet,
                         "bullet_font": bullet_font,
-                        "required": {
-                            "level": CATEGORY_HEADER_LEVEL,
-                            "bullet": CATEGORY_HEADER_BULLET,
-                            "bullet_font": CATEGORY_HEADER_BULLET_FONT,
-                        },
+                        "text": (p.get("text") or "")[:80],
+                        "required": category_bullet_spec.describe(),
                     }
                 )
 
@@ -279,6 +329,7 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
             "header_metrics": header_metrics,
             "position_in": {
                 "top": _emu_in(hl.top),
+                "left": _emu_in(hl.left),
                 "height": _emu_in(hl.height),
                 "bottom": _emu_in(hl.top + hl.height),
                 "width": _emu_in(hl.width),
@@ -305,6 +356,8 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
         entry["key_activities"] = {
             "position_in": {
                 "top": _emu_in(ka.top),
+                "left": _emu_in(ka.left),
+                "width": _emu_in(ka.width),
                 "height": _emu_in(ka.height),
                 "bottom": _emu_in(ka.top + ka.height),
             },
@@ -317,12 +370,23 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
         }
         entry["ka_waste_below_text_in"] = ka_waste_below_text_in(ka)
         entry["ka_rendered_text_bottom_in"] = ka_rendered_text_bottom_in(ka)
+        entry["ka_content_top_in"] = ka_content_top_in(ka)
+        entry["ka_waste_above_text_in"] = ka_waste_above_text_in(ka)
+        ka_pos = entry.get("key_activities", {}).get("position_in") or {}
+        ka_bottom_in = float(ka_pos.get("bottom") or 0)
+        ka_content_top_in_val = float(entry["ka_content_top_in"] or 0)
+        if item_count > 0 and ka_bottom_in > ka_content_top_in_val:
+            line_height_in = 50292 / EMU_PER_INCH * 1.12
+            used_height = float(entry["ka_waste_above_text_in"] or 0) + item_count * line_height_in
+            entry["ka_box_unused_in"] = round(
+                max(ka_bottom_in - ka_content_top_in_val - used_height, 0.0), 4
+            )
 
     if hl and ka:
         hl_bottom = hl.top + hl.height
         entry["hl_ka_gap_in"] = round((ka.top - hl_bottom) / EMU_PER_INCH, 4)
         try:
-            uds, g10x_prs = _uds_helpers()
+            uds, g10x_prs = _uds_helpers(reference_template)
             service = _service_base_title(title)
             layout = uds.get_g10x_layout_slide(g10x_prs, service)
             if layout is not None:
@@ -353,6 +417,21 @@ def extract_slide(slide, slide_index: int) -> dict[str, Any] | None:
     hl_metrics = entry.get("highlights")
     if hl and hl_metrics and not entry.get("_rendered_bounds_deferred"):
         entry["hl_waste_below_text_in"] = _hl_waste_below_text_in(hl)
+        entry["hl_content_top_in"] = hl_content_top_in(hl)
+        entry["hl_waste_above_text_in"] = hl_waste_above_text_in_estimated(hl)
+        hl_pos = entry.get("highlights", {}).get("position_in") or {}
+        hl_bottom_in = float(hl_pos.get("bottom") or 0)
+        content_top_in = float(entry["hl_content_top_in"] or 0)
+        line_count = max(
+            int(hl_metrics.get("visual_line_count") or 0),
+            int(hl_metrics.get("filled_paragraph_count") or 0),
+        )
+        if hl_bottom_in > content_top_in and line_count > 0:
+            line_height_in = 0.156 * 1.12
+            used_height = float(entry["hl_waste_above_text_in"] or 0) + line_count * line_height_in
+            entry["hl_box_unused_in"] = round(
+                max(hl_bottom_in - content_top_in - used_height, 0.0), 4
+            )
         entry["hl_text_bounds_method"] = "estimated"
 
     ka_has_items = ka is not None and count_ka_items(ka) > 0
@@ -397,14 +476,25 @@ def _bullet_distribution(paras: list[dict]) -> dict[str, int]:
 def extract_deck(
     ppt_path: str | Path,
     *,
+    reference_template: str | Path | None = None,
+    category_bullet_spec: CategoryBulletSpec | None = None,
+    label_spec: TemplateLabelSpec | None = None,
     use_rendered_bounds: bool = True,
 ) -> dict[str, Any]:
     """Extract all delivery-status slides from the entire deck."""
     ppt_path = Path(ppt_path)
+    ref_template = Path(reference_template).resolve() if reference_template else None
+    resolved_labels = _resolve_label_spec(label_spec, ref_template)
     prs = Presentation(str(ppt_path))
     slides = []
     for i, slide in enumerate(prs.slides, start=1):
-        data = extract_slide(slide, i)
+        data = extract_slide(
+            slide,
+            i,
+            reference_template=ref_template,
+            category_bullet_spec=category_bullet_spec,
+            label_spec=resolved_labels,
+        )
         if data:
             if use_rendered_bounds:
                 data["_rendered_bounds_deferred"] = True

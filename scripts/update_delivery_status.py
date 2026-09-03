@@ -31,6 +31,11 @@ sys.path.insert(0, str(_REPO_ROOT))
 from app.services.sprint_display import sprint_dates_from_section
 from app.services.ppt_cover_date import format_wsr_cover_date, sync_cover_slide_wsr_date
 from app.services.ppt_logo_sync import sync_heb_logo_from_main
+from app.services.template_block_spec import extract_block_spec_from_cell
+from app.services.template_content_filler import (
+    fill_highlights_cell as template_fill_highlights_cell,
+    fill_highlights_contd_cell as template_fill_highlights_contd_cell,
+)
 
 G10X = str(_REPO_ROOT / "templates" / "G10X H-E-B WSR Sustainment 05 June 2026 .pptx")
 OUTPUT = str(_REPO_ROOT / "output" / "HEB_Delivery_Status.pptx")
@@ -241,56 +246,46 @@ def load_layout_hints(path: str | Path | None) -> dict:
 
 
 def build_content(raw, totals_raw=None):
-    totals = totals_raw or raw
     if raw.get("sections"):
         return {
             "title": raw["title"],
-            "sections": [_section_display_content(s) for s in raw["sections"]],
+            "sections": [_section_payload(s) for s in raw["sections"]],
         }
 
-    released = raw["released"]
-    inprogress = raw["inprogress"]
-    completed = raw["completed"]
-    total = len(totals["released"]) + len(totals["inprogress"]) + len(totals["completed"])
-    sprint_status = totals.get("sprint_status", "In-progress")
     return {
         "title": raw["title"],
-        "sprint_bold": f"Sprint \u2013 {raw['sprint_name']}, {sprint_status} ",
-        "sprint_light": (
-            f"({raw['sprint_dates']}) Stories (Total \u2013 {total}, "
-            f"Done \u2013 {len(totals['completed'])}, In-review \u2013 {len(totals['released'])}, "
-            f"In-progress \u2013 {len(totals['inprogress'])})"
-        ),
+        **_section_payload(raw),
+    }
+
+
+def _section_payload(section):
+    """Raw sprint section payload for template-driven populate."""
+    released = section.get("released") or []
+    inprogress = section.get("inprogress") or []
+    completed = section.get("completed") or []
+    return {
+        "sprint_name": section.get("sprint_name", ""),
+        "sprint_dates": section.get("sprint_dates", ""),
+        "sprint_status": section.get("sprint_status", "In-progress"),
+        "sprint_start_date": section.get("sprint_start_date"),
+        "sprint_end_date": section.get("sprint_end_date"),
+        "released": list(released),
+        "inprogress": list(inprogress),
+        "completed": list(completed),
         "released_count": str(len(released)),
-        "released_items": released,
+        "released_items": list(released),
         "inprogress_count": str(len(inprogress)),
-        "inprogress_items": inprogress,
+        "inprogress_items": list(inprogress),
         "completed_count": str(len(completed)),
-        "completed_items": completed,
+        "completed_items": list(completed),
+        "continued_section": section.get("continued_section", False),
+        "omit_category_headers": list(section.get("omit_category_headers") or []),
     }
 
 
 def _section_display_content(section):
-    """Build populate_highlights_cell payload for one sprint section."""
-    released = section["released"]
-    inprogress = section["inprogress"]
-    completed = section["completed"]
-    total = len(released) + len(inprogress) + len(completed)
-    sprint_status = section.get("sprint_status", "In-progress")
-    return {
-        "sprint_bold": f"Sprint \u2013 {section['sprint_name']}, {sprint_status} ",
-        "sprint_light": (
-            f"({section['sprint_dates']}) Stories (Total \u2013 {total}, "
-            f"Done \u2013 {len(completed)}, In-review \u2013 {len(released)}, "
-            f"In-progress \u2013 {len(inprogress)})"
-        ),
-        "released_count": str(len(released)),
-        "released_items": released,
-        "inprogress_count": str(len(inprogress)),
-        "inprogress_items": inprogress,
-        "completed_count": str(len(completed)),
-        "completed_items": completed,
-    }
+    """Backward-compatible alias for overflow helpers."""
+    return _section_payload(section)
 
 
 def _flatten_story_raw(raw):
@@ -2284,67 +2279,31 @@ def discover_section_templates(canonical_cell, global_completed=None):
     return {key: copy.deepcopy(val) for key, val in required.items()}
 
 
-def populate_highlights_cell(hl_cell, section_tmpl, content):
-    """Populate highlights — supports multiple sprint sections per slide."""
-    hl_txBody = hl_cell.text_frame._txBody
-
-    for p in list(hl_txBody.findall(qn("a:p"))):
-        hl_txBody.remove(p)
-
-    sections = content.get("sections")
-    if not sections:
-        sections = [content]
-
-    new_paras = []
-    for si, sec in enumerate(sections):
-        if si > 0:
-            new_paras.append(_make_sprint_gap_para(section_tmpl))
-        new_paras.append(copy.deepcopy(section_tmpl["sprint"]))
-        new_paras.append(copy.deepcopy(section_tmpl["current_week"]))
-        _append_bucket_templates(new_paras, section_tmpl, sec)
-    for p in new_paras:
-        hl_txBody.append(p)
-
-    offset = 0
-    for si, sec in enumerate(sections):
-        if si > 0:
-            offset += 1
-        all_p = hl_txBody.findall(qn("a:p"))
-        set_sprint_line(
-            all_p[offset],
-            sec["sprint_bold"],
-            sec["sprint_light"],
-        )
-        offset += 2
-        offset = _fill_story_buckets(hl_txBody, offset, sec, display=True)
-
-    strip_trailing_empty_paragraphs(hl_txBody)
+def populate_highlights_cell(hl_cell, block_spec, content, track_name=""):
+    """Populate highlights using template block spec + placeholder substitution."""
+    sections = content.get("sections") or [content]
+    if isinstance(block_spec, dict):
+        cell = hl_cell
+        block_spec = extract_block_spec_from_cell(cell)
+    template_fill_highlights_cell(
+        hl_cell,
+        block_spec,
+        sections,
+        track_name=track_name or content.get("title", ""),
+    )
 
 
-def populate_highlights_contd_cell(hl_cell, section_tmpl, contd_raw):
-    """Highlights overflow on (Contd...) — supports multi-sprint sections."""
-    if contd_raw.get("sections"):
-        _populate_highlights_contd_sections(
-            hl_cell, section_tmpl, contd_raw["sections"]
-        )
-        return
-
-    hl_txBody = hl_cell.text_frame._txBody
-
-    for p in list(hl_txBody.findall(qn("a:p"))):
-        hl_txBody.remove(p)
-
-    omit = set(contd_raw.get("omit_category_headers", []))
-
-    new_paras = []
-    _append_bucket_templates(new_paras, section_tmpl, contd_raw, omit=omit)
-    for p in new_paras:
-        hl_txBody.append(p)
-
-    offset = 0
-    offset = _fill_story_buckets(hl_txBody, offset, contd_raw, omit=omit)
-
-    strip_trailing_empty_paragraphs(hl_txBody)
+def populate_highlights_contd_cell(hl_cell, block_spec, contd_raw, track_name=""):
+    """Highlights overflow on (Contd...) — template-driven."""
+    sections = contd_raw.get("sections") or [contd_raw]
+    if isinstance(block_spec, dict):
+        block_spec = extract_block_spec_from_cell(hl_cell)
+    template_fill_highlights_contd_cell(
+        hl_cell,
+        block_spec,
+        sections,
+        track_name=track_name,
+    )
 
 
 def _populate_highlights_contd_sections(hl_cell, section_tmpl, sections):
@@ -2457,7 +2416,9 @@ def ensure_hl_only_contd_slide(
     contd_raw,
     ref_title,
     g10x_layout,
-    section_tmpl,
+    block_spec,
+    *,
+    track_name: str = "",
 ):
     """
     (Contd...) with highlights overflow only — Key Activities stays on the main slide.
@@ -2480,8 +2441,9 @@ def ensure_hl_only_contd_slide(
     hl_shape = get_highlights_shape(contd_slide)
     populate_highlights_contd_cell(
         hl_shape.table.cell(2, 0),
-        section_tmpl,
+        block_spec,
         contd_raw,
+        track_name=track_name or service_title,
     )
     fit_hl_only_contd_layout(contd_slide, g10x_layout)
 
@@ -2498,10 +2460,11 @@ def ensure_highlights_contd_slide(
     contd_raw,
     ref_title,
     g10x_layout,
-    section_tmpl,
+    block_spec,
     profile=None,
     raw=None,
     layout_mode="hl_ka_contd",
+    track_name="",
 ):
     """
     (Contd...) slide(s): remaining highlights, then Key Activities on the last slide.
@@ -2520,7 +2483,8 @@ def ensure_highlights_contd_slide(
             contd_raw,
             ref_title,
             g10x_layout,
-            section_tmpl,
+            block_spec,
+            track_name=track_name or service_title,
         )
     for idx in sorted(find_contd_slides_for_service(prs, service_title), reverse=True):
         delete_slide(prs, idx)
@@ -2532,9 +2496,10 @@ def ensure_highlights_contd_slide(
         contd_raw,
         ref_title,
         g10x_layout,
-        section_tmpl,
+        block_spec,
         profile,
         raw if raw is not None else contd_raw,
+        track_name=track_name or service_title,
     )
 
 
@@ -2714,8 +2679,10 @@ def _append_hl_only_contd_slide(
     contd_raw,
     ref_title,
     g10x_layout,
-    section_tmpl,
+    block_spec,
     main_slide,
+    *,
+    track_name: str = "",
 ):
     contd_idx = _create_contd_slide_after(
         prs, g10x_prs, after_idx, HIGHLIGHTS_CONTD_TEMPLATE_INDEX
@@ -2724,7 +2691,10 @@ def _append_hl_only_contd_slide(
     set_title_suffix(contd_slide, f"{service_title}  (Contd\u2026)", ref_title)
     hl_shape = get_highlights_shape(contd_slide)
     populate_highlights_contd_cell(
-        hl_shape.table.cell(2, 0), section_tmpl, contd_raw
+        hl_shape.table.cell(2, 0),
+        block_spec,
+        contd_raw,
+        track_name=track_name or service_title,
     )
     fit_hl_only_contd_layout(contd_slide, g10x_layout)
     sync_heb_logo_from_main(main_slide, contd_slide)
@@ -2739,8 +2709,10 @@ def _append_hl_ka_contd_slide(
     contd_raw,
     ref_title,
     g10x_layout,
-    section_tmpl,
+    block_spec,
     main_slide,
+    *,
+    track_name: str = "",
 ):
     contd_idx = _create_contd_slide_after(
         prs, g10x_prs, after_idx, HIGHLIGHTS_KA_CONTD_TEMPLATE_INDEX
@@ -2749,7 +2721,10 @@ def _append_hl_ka_contd_slide(
     set_title_suffix(contd_slide, f"{service_title}  (Contd\u2026)", ref_title)
     hl_shape = get_highlights_shape(contd_slide)
     populate_highlights_contd_cell(
-        hl_shape.table.cell(2, 0), section_tmpl, contd_raw
+        hl_shape.table.cell(2, 0),
+        block_spec,
+        contd_raw,
+        track_name=track_name or service_title,
     )
     move_ka_from_main_to_contd(main_slide, contd_slide, g10x_layout, g10x_prs)
     fit_contd_slide_layout(contd_slide, g10x_layout, g10x_prs)
@@ -2766,9 +2741,10 @@ def ensure_contd_slide_chain(
     contd_raw,
     ref_title,
     g10x_layout,
-    section_tmpl,
+    block_spec,
     profile,
     raw,
+    track_name="",
 ):
     """
     Create one or more (Contd…) slides — HL-only continuations first, then HL + KA.
@@ -2792,8 +2768,9 @@ def ensure_contd_slide_chain(
                 chunk_raw,
                 ref_title,
                 g10x_layout,
-                section_tmpl,
+                block_spec,
                 main_slide,
+                track_name=track_name or service_title,
             )
         else:
             after_idx = _append_hl_ka_contd_slide(
@@ -2804,8 +2781,9 @@ def ensure_contd_slide_chain(
                 chunk_raw,
                 ref_title,
                 g10x_layout,
-                section_tmpl,
+                block_spec,
                 main_slide,
+                track_name=track_name or service_title,
             )
     return after_idx
 
@@ -3301,12 +3279,14 @@ def main():
     slides_data = SLIDES
     using_json = False
     wsr_end_date = args.wsr_end_date.strip() or None
+    wsr_start_date = None
     if args.content and Path(args.content).is_file():
         with open(args.content, encoding="utf-8") as f:
             content_payload = json.load(f)
         slides_data = load_slides_from_json(args.content)
         if not wsr_end_date:
             wsr_end_date = content_payload.get("report_end_date")
+        wsr_start_date = content_payload.get("report_start_date")
         using_json = True
         print(f"Loaded {len(slides_data)} slide(s) from {args.content}")
 
@@ -3332,10 +3312,10 @@ def main():
         if slide_idx is None:
             print(f"Warning: slide not found for {raw['title']}")
             continue
+        slide = prs.slides[slide_idx]
         g10x_layout = get_g10x_layout_slide(g10x, raw["title"])
-        section_tmpl = discover_section_templates(
-            canonical_style_cell, (completed_hdr, completed_bullet)
-        )
+        hl_shape = get_highlights_shape(slide)
+        block_spec = extract_block_spec_from_cell(hl_shape.table.cell(2, 0))
         profile = build_layout_profile(g10x_layout)
         profile["canonical_fill_para_count"] = canonical_fill
         profile["canonical_para_slot_count"] = canonical_slots
@@ -3361,13 +3341,12 @@ def main():
             )
 
         content = build_content(main_raw, totals_raw=story_raw)
-        slide = prs.slides[slide_idx]
         set_title_suffix(slide, content["title"], ref_title)
-        hl_shape = get_highlights_shape(slide)
         populate_highlights_cell(
             hl_shape.table.cell(2, 0),
-            section_tmpl,
+            block_spec,
             content,
+            track_name=raw["title"],
         )
         ka_item_count = ka_layout_item_count(raw)
         hl_overflow_contd = layout_mode in ("hl_ka_contd", "supplier_contd")
@@ -3381,10 +3360,11 @@ def main():
                 contd_raw,
                 ref_title,
                 g10x_layout,
-                section_tmpl,
+                block_spec,
                 profile=profile,
                 raw=raw,
                 layout_mode=layout_mode,
+                track_name=raw["title"],
             )
             main_ka = get_key_activities_shape(slide)
             if main_ka:
@@ -3494,6 +3474,15 @@ def main():
             )
         else:
             print("Warning: cover slide date placeholder not found")
+
+    if wsr_start_date and wsr_end_date:
+        from app.services.template_content_filler import sync_delivery_slide_week_dates
+
+        week_updates = sync_delivery_slide_week_dates(prs, wsr_start_date, wsr_end_date)
+        if week_updates:
+            print(
+                f"Updated week date placeholders on {week_updates} delivery slide text frame(s)"
+            )
 
     out = deck_path
     try:

@@ -9,6 +9,7 @@ from app.services.sprint_display import sprint_dates_from_section
 
 
 def _sprint_line(section: dict[str, Any]) -> str:
+    """Preview sprint summary from structured section fields (not hardcoded template text)."""
     total = (
         len(section["released"])
         + len(section["inprogress"])
@@ -17,11 +18,9 @@ def _sprint_line(section: dict[str, Any]) -> str:
     status = section.get("sprint_status", "In-progress")
     sprint_dates = sprint_dates_from_section(section)
     return (
-        f"Sprint – {section['sprint_name']}, {status} "
-        f"({sprint_dates}) Stories "
-        f"(Total – {total}, Done – {len(section['completed'])}, "
-        f"In-review – {len(section['released'])}, "
-        f"In-progress – {len(section['inprogress'])})"
+        f"  [sprint] name={section['sprint_name']!r}, status={status!r}, dates={sprint_dates!r}, "
+        f"total={total}, done={len(section['completed'])}, "
+        f"in_review={len(section['released'])}, in_progress={len(section['inprogress'])}"
     )
 
 
@@ -64,16 +63,16 @@ def format_slide_preview(slide: dict[str, Any]) -> str:
     for section in _slide_sections(slide):
         lines.append(_sprint_line(section))
         lines.append("")
-        lines.append("  Current week sprint status")
+        lines.append("  [static labels from template — see generated .pptx]")
         lines.append("")
         if section["released"]:
-            lines.extend(_bullet_section("Stories released for partner review", section["released"]))
+            lines.extend(_bullet_section("released", section["released"]))
             lines.append("")
         if section["inprogress"]:
-            lines.extend(_bullet_section("Stories in-progress this week", section["inprogress"]))
+            lines.extend(_bullet_section("inprogress", section["inprogress"]))
             lines.append("")
         if section["completed"]:
-            lines.extend(_bullet_section("Stories completed this week", section["completed"]))
+            lines.extend(_bullet_section("completed", section["completed"]))
             lines.append("")
 
     ka = slide.get("key_activities") or []

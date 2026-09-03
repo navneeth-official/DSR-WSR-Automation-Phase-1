@@ -22,6 +22,8 @@ class ComHlTextBounds:
     content_bottom_in: float
     content_left_in: float
     content_right_in: float
+    text_top_in: float | None = None
+    waste_above_in: float = 0.0
     method: str = "com"
 
     def to_dict(self) -> dict[str, Any]:
@@ -34,6 +36,8 @@ class ComHlTextBounds:
             "content_bottom_in": self.content_bottom_in,
             "content_left_in": self.content_left_in,
             "content_right_in": self.content_right_in,
+            "text_top_in": self.text_top_in,
+            "waste_above_in": self.waste_above_in,
             "method": self.method,
         }
 
@@ -49,13 +53,37 @@ def _set_powerpoint_visible(app, *, visible: bool) -> None:
 
 
 def _iter_hl_shapes(slide: Any) -> Iterator[Any]:
-    for shape_id in (9, 7):
+    """Yield Highlights tables — by header text first, then legacy shape IDs."""
+    for idx in range(1, int(slide.Shapes.Count) + 1):
+        shape = slide.Shapes(idx)
+        if not shape.HasTable:
+            continue
+        try:
+            rows = int(shape.Table.Rows.Count)
+            cols = int(shape.Table.Columns.Count)
+        except Exception:
+            continue
+        if rows < 3 or cols < 3:
+            continue
+        try:
+            header = str(shape.Table.Cell(1, 1).Shape.TextFrame.TextRange.Text or "").strip().lower()
+        except Exception:
+            try:
+                header = str(shape.Table.Cell(1, 1).TextFrame.TextRange.Text or "").strip().lower()
+            except Exception:
+                continue
+        if "highlight" in header:
+            yield shape
+            return
+
+    for shape_id in (9, 7, 4):
         for idx in range(1, int(slide.Shapes.Count) + 1):
             shape = slide.Shapes(idx)
             if int(shape.Id) != shape_id or not shape.HasTable:
                 continue
             if int(shape.Table.Rows.Count) == 3:
                 yield shape
+                return
 
 
 def _absolute_text_bottom_pt(cell_shape: Any, text_range: Any) -> float | None:
@@ -105,6 +133,61 @@ def _paragraph_max_bottom_pt(cell_shape: Any, text_range: Any) -> float | None:
     return _absolute_text_bottom_pt(cell_shape, text_range)
 
 
+def _paragraph_min_top_pt(cell_shape: Any, text_range: Any) -> float | None:
+    """Min slide-absolute top across non-empty paragraphs."""
+    best: float | None = None
+    try:
+        paras = text_range.Paragraphs
+        count = int(paras.Count)
+    except Exception:
+        try:
+            rel_top = float(text_range.BoundTop)
+        except Exception:
+            return None
+        if rel_top <= 0:
+            return None
+        return float(cell_shape.Top) + rel_top
+
+    for i in range(1, count + 1):
+        try:
+            para = paras.Item(i)
+        except Exception:
+            continue
+        if not str(para.Text or "").strip():
+            continue
+        try:
+            rel_top = float(para.BoundTop)
+        except Exception:
+            continue
+        abs_top = float(cell_shape.Top) + rel_top
+        best = abs_top if best is None else min(best, abs_top)
+
+    if best is not None:
+        return best
+    try:
+        rel_top = float(text_range.BoundTop)
+    except Exception:
+        return None
+    if rel_top <= 0:
+        return None
+    return float(cell_shape.Top) + rel_top
+
+
+def _hl_content_text_top_pt(hl_shape: Any) -> float | None:
+    """Top of visible text in HL content cell (row 3, col 1 — COM 1-based)."""
+    cell_shape = hl_shape.Table.Cell(3, 1).Shape
+    text_range = None
+    for accessor in ("TextFrame2", "TextFrame"):
+        try:
+            text_range = getattr(cell_shape, accessor).TextRange
+            break
+        except Exception:
+            continue
+    if text_range is None:
+        return None
+    return _paragraph_min_top_pt(cell_shape, text_range)
+
+
 def _hl_content_text_bottom_pt(hl_shape: Any) -> float | None:
     """Bottom of visible text in HL content cell (row 3, col 1 — COM 1-based)."""
     cell_shape = hl_shape.Table.Cell(3, 1).Shape
@@ -143,6 +226,7 @@ def measure_hl_text_bounds_com(slide: Any) -> ComHlTextBounds | None:
         return None
 
     text_bottom_pt = _hl_content_text_bottom_pt(hl_shape)
+    text_top_pt = _hl_content_text_top_pt(hl_shape)
     if text_bottom_pt is None:
         return None
 
@@ -154,19 +238,28 @@ def measure_hl_text_bounds_com(slide: Any) -> ComHlTextBounds | None:
         _hl_content_row_bounds_pt(hl_shape)
     )
     text_bottom_in = round(text_bottom_pt / POINTS_PER_INCH, 4)
+    text_top_in = (
+        round(text_top_pt / POINTS_PER_INCH, 4) if text_top_pt is not None else None
+    )
+    content_top_in = round(content_top_pt / POINTS_PER_INCH, 4)
     hl_top_in = round(hl_top_pt / POINTS_PER_INCH, 4)
     hl_bottom_in = round(hl_bottom_pt / POINTS_PER_INCH, 4)
     waste_in = round(max(hl_bottom_in - text_bottom_in, 0.0), 4)
+    waste_above_in = 0.0
+    if text_top_in is not None:
+        waste_above_in = round(max(text_top_in - content_top_in, 0.0), 4)
 
     return ComHlTextBounds(
         text_bottom_in=text_bottom_in,
         hl_bottom_in=hl_bottom_in,
         hl_top_in=hl_top_in,
         waste_in=waste_in,
-        content_top_in=round(content_top_pt / POINTS_PER_INCH, 4),
+        content_top_in=content_top_in,
         content_bottom_in=round(content_bottom_pt / POINTS_PER_INCH, 4),
         content_left_in=round(content_left_pt / POINTS_PER_INCH, 4),
         content_right_in=round(content_right_pt / POINTS_PER_INCH, 4),
+        text_top_in=text_top_in,
+        waste_above_in=waste_above_in,
         method="com",
     )
 

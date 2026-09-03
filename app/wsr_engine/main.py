@@ -139,6 +139,19 @@ class WsrEngine:
             else:
                 logger.warning("Cover slide date placeholder not found")
 
+        from app.services.template_content_filler import sync_delivery_slide_week_dates
+
+        week_updates = sync_delivery_slide_week_dates(
+            writer.prs,
+            content.report_start_date,
+            content.report_end_date,
+        )
+        if week_updates:
+            logger.info(
+                "Updated week date placeholders on %d delivery slide text frame(s)",
+                week_updates,
+            )
+
         from app.wsr_engine.slide_ops import normalize_slide_partnames
 
         logo_ref = resolve_logo_reference_slide(writer.template_prs, template.projects)

@@ -11,10 +11,14 @@ from app.wsr_engine.models import ProjectContent, SprintSection, WsrContent
 
 def _normalize_section(section: dict) -> SprintSection:
     dates = sprint_dates_from_section(section)
+    start = section.get("sprint_start_date")
+    end = section.get("sprint_end_date")
     return SprintSection(
         sprint_name=section["sprint_name"],
         sprint_dates=dates,
         sprint_status=section.get("sprint_status", "In-progress"),
+        sprint_start_date=str(start) if start else None,
+        sprint_end_date=str(end) if end else None,
         completed=list(section.get("completed", [])),
         released=list(section.get("released", [])),
         inprogress=list(section.get("inprogress", [])),

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from app.validation.typography_display import display_font_list, human_role_label
 
 _AREA_BY_RULE: dict[str, str] = {
     "HL-WASTE-01": "highlights",
+    "HL-TOP-WASTE-01": "highlights",
+    "HL-BOTTOM-WASTE-01": "highlights",
+    "HL-UTIL-01": "highlights",
     "HL-SIZE-01": "highlights",
     "CONT-HL-01": "highlights",
     "CONT-SPARSE-01": "highlights",
@@ -26,6 +29,9 @@ _AREA_BY_RULE: dict[str, str] = {
     "HL-P-06": "highlights",
     "KA-OVERLAP-01": "layout",
     "KA-SIZE-01": "key_activities",
+    "KA-TOP-WASTE-01": "key_activities",
+    "KA-BOTTOM-WASTE-01": "key_activities",
+    "KA-UTIL-01": "key_activities",
     "KA-PLC-02": "layout",
     "KA-PLC-03": "layout",
     "KA-PLC-04": "key_activities",
@@ -42,8 +48,16 @@ _AREA_BY_RULE: dict[str, str] = {
 
 _ANNOT_LABEL_BY_RULE: dict[str, str] = {
     "HL-WASTE-01": "Empty space here",
+    "HL-TOP-WASTE-01": "Unused top space",
+    "HL-BOTTOM-WASTE-01": "Unused bottom space",
+    "HL-UTIL-01": "Under-used area",
     "CONT-HL-01": "Empty space here",
     "CONT-SPARSE-01": "Empty space here",
+    "HL-SIZE-01": "Empty space here",
+    "KA-TOP-WASTE-01": "Unused top space",
+    "KA-BOTTOM-WASTE-01": "Unused bottom space",
+    "KA-UTIL-01": "Under-used area",
+    "KA-SIZE-01": "Empty space here",
     "HL-SPC-02": "Wrong line spacing",
     "HL-P-01": "Wrong font size",
     "HL-P-02": "Wrong font size",
@@ -68,11 +82,62 @@ def _service_label(title: str) -> str:
     return base or title
 
 
+def _typography_detail_issue(detail: dict[str, Any]) -> str:
+    role = human_role_label(str(detail.get("role") or "text"))
+    issue = str(detail.get("issue") or "")
+    text = detail.get("text")
+    snippet = f" ('{text}')" if text else ""
+    if issue == "wrong_font":
+        expected = detail.get("expected_fonts") or [detail.get("expected_font")]
+        expected_txt = ", ".join(str(x) for x in expected if x)
+        return f"Wrong font on {role}{snippet}: got '{detail.get('font')}', expected {expected_txt}"
+    if issue == "wrong_size":
+        return (
+            f"Wrong size on {role}{snippet}: got {detail.get('size_pt')}pt, "
+            f"expected {detail.get('expected_size_pt')}pt"
+        )
+    if issue == "not_bold":
+        return f"Missing bold on {role}{snippet} (template requires bold)"
+    if issue == "unexpected_bold":
+        return f"Unexpected bold on {role}{snippet} (template requires regular weight)"
+    if issue == "wrong_line_spacing":
+        return (
+            f"Wrong line spacing on {role}{snippet}: got {detail.get('line_spacing_pt')}pt, "
+            f"expected {detail.get('expected_line_spacing_pt')}pt"
+        )
+    if issue == "wrong_color":
+        expected = detail.get("expected_colors") or []
+        expected_txt = ", ".join(str(x) for x in expected if x)
+        return f"Wrong color on {role}{snippet}: got '{detail.get('color')}', expected {expected_txt}"
+    if issue == "extra_blanks_after_current_week":
+        return (
+            f"Extra blank line(s) after Current week sprint status "
+            f"({detail.get('blank_count')} found, template allows {detail.get('expected_max')})"
+        )
+    if issue == "extra_sprint_gap_blanks":
+        return (
+            f"Extra blank line(s) before the next sprint block "
+            f"({detail.get('blank_count')} found, template allows {detail.get('expected_max')})"
+        )
+    if issue == "sprint_line_spc_bef_high":
+        return (
+            f"Sprint line top spacing is too large "
+            f"({detail.get('spc_bef_pt')} pt, template {detail.get('expected_max_spc_bef_pt')} pt)"
+        )
+    return ""
+
+
 def _issue_for_rule(rule_id: str, violation: dict[str, Any]) -> str:
     templates: dict[str, str] = {
         "HL-WASTE-01": "Too much empty space in the Highlights box",
+        "HL-TOP-WASTE-01": "Unused empty space at the top of the Highlights box",
+        "HL-BOTTOM-WASTE-01": "Unused empty space at the bottom of the Highlights box",
+        "HL-UTIL-01": "Highlights box is larger than needed for the content",
         "CONT-HL-01": "Highlights continuation box is taller than needed",
         "CONT-SPARSE-01": "Highlights box is too tall for the amount of text",
+        "KA-TOP-WASTE-01": "Unused empty space at the top of the Key Activities box",
+        "KA-BOTTOM-WASTE-01": "Unused empty space at the bottom of the Key Activities box",
+        "KA-UTIL-01": "Key Activities box is larger than needed for the items",
         "HL-OVERFLOW-01": "Highlights text runs outside its gray box",
         "KA-OVERLAP-01": "Highlights text overlaps the Key Activities area",
         "GEO-02": "Content is too close to or crosses the footer area",
@@ -81,6 +146,7 @@ def _issue_for_rule(rule_id: str, violation: dict[str, Any]) -> str:
         "CONTENT-KA-01": "Key Activities still shows old sample or leftover text",
         "CONTENT-KA-02": "Key Activities should be empty but contains text",
         "HL-SPC-02": "Line spacing between bullets does not match the template",
+        "HL-SPC-03": "Extra spacing between sprint blocks does not match the template",
         "HL-P-01": "Highlights header font or size does not match the template",
         "HL-P-02": "Sprint line font or size does not match the template",
         "HL-P-03": "Current-week status font or size does not match the template",
@@ -91,6 +157,11 @@ def _issue_for_rule(rule_id: str, violation: dict[str, Any]) -> str:
         "HL-HDR-03": "Category header bullet format is wrong",
         "TITLE-01": "Slide title uses the wrong dash style",
     }
+    details = violation.get("details")
+    if rule_id.startswith(("HL-P", "HL-HDR", "HL-SPC")) and isinstance(details, list) and details:
+        detail_issue = _typography_detail_issue(details[0])
+        if detail_issue:
+            return detail_issue
     if rule_id in templates:
         return templates[rule_id]
     message = str(violation.get("message") or "").strip()
@@ -115,7 +186,38 @@ def _where_for_rule(rule_id: str, area: str) -> str:
     return where_map.get(area, "This slide")
 
 
+def _typography_fix_steps(violation: dict[str, Any]) -> list[str] | None:
+    details = violation.get("details")
+    if not isinstance(details, list) or not details:
+        return None
+    detail = details[0]
+    issue = str(detail.get("issue") or "")
+    role = str(detail.get("role") or "text").replace("_", " ")
+    expected_fonts = detail.get("expected_fonts") or []
+    font_hint = display_font_list(expected_fonts)
+    size = detail.get("expected_size_pt")
+    size_hint = f" and size to {size:g} pt" if size is not None else ""
+    if issue == "wrong_font":
+        return [f"Select the {role} line.", f"Set font to {font_hint}{size_hint}."]
+    if issue == "wrong_size":
+        return [f"Select the {role} line.", f"Set size to {size:g} pt (font: {font_hint})."]
+    if issue == "not_bold":
+        return [f"Select the {role} line.", f"Apply bold ({font_hint}{size_hint})."]
+    if issue == "unexpected_bold":
+        return [f"Select the {role} line.", f"Remove bold — use regular weight ({font_hint}{size_hint})."]
+    if issue == "wrong_line_spacing":
+        expected = detail.get("expected_line_spacing_pt")
+        return [
+            f"Select the {role} line.",
+            f"Set line spacing to {expected:g} pt to match the template.",
+        ]
+    return None
+
+
 def _fix_steps_for_rule(rule_id: str, violation: dict[str, Any]) -> list[str]:
+    typo_steps = _typography_fix_steps(violation)
+    if typo_steps:
+        return typo_steps
     fixes: dict[str, list[str]] = {
         "HL-WASTE-01": [
             "Select the Highlights table.",
@@ -153,27 +255,19 @@ def _fix_steps_for_rule(rule_id: str, violation: dict[str, Any]) -> list[str]:
         ],
         "HL-SPC-02": [
             "Select the affected bullet lines.",
-            "Set line spacing to Single, 16 pt (match other project slides).",
+            "Set line spacing to match the template (see validation metrics for expected pt).",
         ],
-        "HL-P-01": [
-            "Select the Highlights header line.",
-            "Set font to Manrope Bold and size to 14 pt.",
+        "HL-TOP-WASTE-01": [
+            "Select the Highlights table.",
+            "Move content up or shrink the box to reduce empty space at the top.",
         ],
-        "HL-P-02": [
-            "Select the sprint title lines.",
-            "Set font to Manrope Light and size to 12 pt.",
+        "HL-BOTTOM-WASTE-01": [
+            "Select the Highlights table.",
+            "Drag the bottom resize handle up until the text sits near the bottom of the gray box.",
         ],
-        "HL-P-03": [
-            "Select the 'Current week sprint status' line.",
-            "Set font to Manrope Light and size to 12 pt.",
-        ],
-        "HL-P-04": [
-            "Select category headers (Completed / Released / In-progress).",
-            "Set font to Manrope 12 pt bold with the Wingdings arrow bullet.",
-        ],
-        "HL-P-05": [
-            "Select story bullet lines.",
-            "Set font to Manrope Light 12 pt regular weight.",
+        "HL-UTIL-01": [
+            "Select the Highlights table.",
+            "Resize the table height to match the amount of content.",
         ],
         "HL-HDR-01": [
             "Select category header lines.",
@@ -186,7 +280,7 @@ def _fix_steps_for_rule(rule_id: str, violation: dict[str, Any]) -> list[str]:
     if rule_id in fixes:
         return fixes[rule_id]
     if violation.get("message"):
-        return [f"Review and fix: {_sanitize(str(violation['message']))}"]
+        return [str(violation["message"]).strip()]
     return ["Review this slide and correct the issue manually."]
 
 
@@ -250,7 +344,7 @@ def enrich_finding(violation: dict[str, Any], *, severity: str) -> dict[str, Any
 
     return {
         "slide_index": slide_index,
-        "slide_number": (slide_index + 1) if slide_index is not None else None,
+        "slide_number": slide_index,
         "slide_title": title,
         "service": _service_label(title),
         "area": area,

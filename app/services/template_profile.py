@@ -22,6 +22,8 @@ from app.services.ppt_shape_utils import (
     service_suffix_from_title,
     slide_title_text,
 )
+from app.services.template_block_spec import TemplateBlockSpec, extract_block_spec_from_cell
+from app.services.template_label_spec import extract_template_label_spec
 from app.wsr_engine.template_mode import is_placeholder_name
 
 CATEGORY_PATTERNS: dict[str, tuple[str, ...]] = {
@@ -55,6 +57,7 @@ class ServiceProfile:
     ka_mode: str = "none"  # none | standalone | embedded
     ka_embedded_start_row: int | None = None
     hl_row_count: int = 3
+    block_spec: TemplateBlockSpec | None = None
 
 
 @dataclass
@@ -183,6 +186,7 @@ def scan_template_profile(template_path: Path | str) -> TemplateProfile:
     path = Path(template_path).resolve()
     prs = Presentation(str(path))
     profile = TemplateProfile(template_file=path.name)
+    label_spec = extract_template_label_spec(path)
 
     mains: dict[str, int] = {}
     contds: dict[str, list[int]] = {}
@@ -203,6 +207,7 @@ def scan_template_profile(template_path: Path | str) -> TemplateProfile:
         cell = hl.table.cell(2, 0)
         paras = cell.text_frame._txBody.findall(qn("a:p"))
         ka_mode, ka_row = _detect_ka_mode(slide, hl)
+        block_spec = extract_block_spec_from_cell(cell, label_spec)
         profile.services[suffix] = ServiceProfile(
             service_title=suffix,
             main_slide_index=main_idx,
@@ -211,6 +216,7 @@ def scan_template_profile(template_path: Path | str) -> TemplateProfile:
             ka_mode=ka_mode,
             ka_embedded_start_row=ka_row,
             hl_row_count=len(hl.table.rows),
+            block_spec=block_spec,
         )
 
     return profile
@@ -252,6 +258,7 @@ def clone_prototype_service_profile(
             ka_mode=proto.ka_mode,
             ka_embedded_start_row=proto.ka_embedded_start_row,
             hl_row_count=proto.hl_row_count,
+            block_spec=proto.block_spec,
         )
         updated.services[proj.project_name] = cloned
 

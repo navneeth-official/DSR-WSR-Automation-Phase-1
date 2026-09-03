@@ -10,6 +10,8 @@ from typing import Any, Literal
 from app.rendering.com_text_bounds import ComHlTextBounds, ComTextBoundsMeasurer
 from app.services.ppt_layout_metrics import (
     EMU_PER_INCH,
+    hl_content_top_in,
+    hl_waste_above_text_in_estimated,
     hl_waste_below_text_in_estimated,
     rendered_text_bottom_emu,
 )
@@ -23,12 +25,18 @@ class HlTextMeasurement:
     hl_bottom_in: float
     waste_in: float
     method: MeasurementMethod
+    text_top_in: float | None = None
+    content_top_in: float | None = None
+    waste_above_in: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "text_bottom_in": self.text_bottom_in,
+            "text_top_in": self.text_top_in,
+            "content_top_in": self.content_top_in,
             "hl_bottom_in": self.hl_bottom_in,
             "waste_in": self.waste_in,
+            "waste_above_in": self.waste_above_in,
             "method": self.method,
         }
 
@@ -98,7 +106,7 @@ def measure_hl_text_bottom_from_image(
     com_bounds: ComHlTextBounds | None = None,
 ) -> HlTextMeasurement | None:
     """
-    Detect bottom-most dark text pixel inside the HL content cell on a rendered PNG.
+    Detect top- and bottom-most dark text pixels inside the HL content cell on a PNG.
     """
     try:
         from PIL import Image
@@ -138,8 +146,9 @@ def measure_hl_text_bottom_from_image(
         pixels = crop.load()
         cw, ch = crop.size
 
+        text_top_px: int | None = None
         text_bottom_px: int | None = None
-        for y in range(ch - 1, -1, -1):
+        for y in range(ch):
             row_has_text = False
             for x in range(cw):
                 r, g, b = pixels[x, y]
@@ -147,18 +156,32 @@ def measure_hl_text_bottom_from_image(
                     row_has_text = True
                     break
             if row_has_text:
+                if text_top_px is None:
+                    text_top_px = y0 + y
                 text_bottom_px = y0 + y
-                break
 
     if text_bottom_px is None:
         return None
 
-    text_bottom_in = round(text_bottom_px / h_px * (slide_height_emu / EMU_PER_INCH), 4)
+    slide_height_in = slide_height_emu / EMU_PER_INCH
+    text_bottom_in = round(text_bottom_px / h_px * slide_height_in, 4)
+    text_top_in = (
+        round(text_top_px / h_px * slide_height_in, 4)
+        if text_top_px is not None
+        else None
+    )
+    content_top_in = round(top / EMU_PER_INCH, 4)
     waste_in = round(max(hl_bottom_in - text_bottom_in, 0.0), 4)
+    waste_above_in = 0.0
+    if text_top_in is not None:
+        waste_above_in = round(max(text_top_in - content_top_in, 0.0), 4)
     return HlTextMeasurement(
         text_bottom_in=text_bottom_in,
+        text_top_in=text_top_in,
+        content_top_in=content_top_in,
         hl_bottom_in=hl_bottom_in,
         waste_in=waste_in,
+        waste_above_in=waste_above_in,
         method="image",
     )
 
@@ -171,10 +194,16 @@ def measure_hl_text_estimated(hl_shape) -> HlTextMeasurement:
     text_bottom_in = round(text_bottom_emu / EMU_PER_INCH, 4)
     hl_bottom_in = round(hl_bottom_emu / EMU_PER_INCH, 4)
     waste_in = hl_waste_below_text_in_estimated(hl_shape, ref_r2=ref_r2)
+    content_top_in = hl_content_top_in(hl_shape)
+    waste_above_in = hl_waste_above_text_in_estimated(hl_shape)
+    text_top_in = round(content_top_in + waste_above_in, 4)
     return HlTextMeasurement(
         text_bottom_in=text_bottom_in,
+        text_top_in=text_top_in,
+        content_top_in=content_top_in,
         hl_bottom_in=hl_bottom_in,
         waste_in=waste_in,
+        waste_above_in=waste_above_in,
         method="estimated",
     )
 
@@ -182,8 +211,11 @@ def measure_hl_text_estimated(hl_shape) -> HlTextMeasurement:
 def _from_com(bounds: ComHlTextBounds) -> HlTextMeasurement:
     return HlTextMeasurement(
         text_bottom_in=bounds.text_bottom_in,
+        text_top_in=bounds.text_top_in,
+        content_top_in=bounds.content_top_in,
         hl_bottom_in=bounds.hl_bottom_in,
         waste_in=bounds.waste_in,
+        waste_above_in=bounds.waste_above_in,
         method="com",
     )
 
@@ -201,8 +233,11 @@ def _refine_com_with_image(
     """
     return HlTextMeasurement(
         text_bottom_in=image.text_bottom_in,
+        text_top_in=image.text_top_in or com.text_top_in,
+        content_top_in=image.content_top_in or com.content_top_in,
         hl_bottom_in=com.hl_bottom_in,
         waste_in=round(max(com.hl_bottom_in - image.text_bottom_in, 0.0), 4),
+        waste_above_in=image.waste_above_in,
         method="image",
     )
 
@@ -319,9 +354,19 @@ def enrich_deck_rendered_hl_metrics(
         stats[method] = stats.get(method, 0) + 1
 
         slide_data["rendered_text_bottom_in"] = measurement.text_bottom_in
+        slide_data["hl_text_top_in"] = measurement.text_top_in
+        slide_data["hl_content_top_in"] = measurement.content_top_in
+        slide_data["hl_waste_above_text_in"] = measurement.waste_above_in
         slide_data["hl_bottom_measured_in"] = measurement.hl_bottom_in
         slide_data["hl_waste_below_text_in"] = measurement.waste_in
         slide_data["hl_text_bounds_method"] = method
+        if slide_data.get("hl_box_unused_in") is not None:
+            slide_data["hl_box_unused_in"] = max(
+                float(slide_data.get("hl_box_unused_in") or 0),
+                float(measurement.waste_in or 0),
+            )
+        else:
+            slide_data["hl_box_unused_in"] = measurement.waste_in
         slide_data["estimated_text_bottom_in"] = measurement.text_bottom_in
         slide_data["hl_text_bottom_for_fit_in"] = measurement.text_bottom_in
 

@@ -1,4 +1,4 @@
-"""Validate a generated WSR deck and write human + CI reports."""
+"""Validate a generated WSR deck — thin wrapper around the unified evaluator."""
 
 from __future__ import annotations
 
@@ -10,16 +10,26 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.validation import validate_deck
+from app.paths import DEFAULT_CONTENT_JSON  # noqa: E402
+from app.services.ppt_format_reference import resolve_evaluation_template  # noqa: E402
+from app.services.ppt_format_report import (  # noqa: E402
+    evaluate_ppt_format,
+    write_validation_companion_reports,
+)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate a WSR deck after build.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate a WSR deck (typography + layout + container waste). "
+            "Prefer: python scripts/evaluate_ppt_format.py for the full unified evaluation."
+        )
+    )
     parser.add_argument("--ppt", required=True, help="Path to generated .pptx")
     parser.add_argument(
         "--template",
-        required=True,
-        help="Reference WSR template .pptx in templates/ (typography source of truth)",
+        default="",
+        help="Reference WSR template .pptx in templates/ (default: Generic Template)",
     )
     parser.add_argument(
         "--output-dir",
@@ -27,46 +37,70 @@ def main() -> int:
         help="Directory for validation_report.* (default: same folder as deck)",
     )
     parser.add_argument(
-        "--annotate",
+        "--no-annotate",
         action="store_true",
-        help="Export annotated PNGs under output/validation/",
+        help="Skip exporting annotated PNG evidence under <output-dir>/validation/",
     )
     parser.add_argument(
         "--no-rendered-bounds",
         action="store_true",
-        help="Skip COM rendered HL bounds (faster, less precise HL waste)",
+        help="Deprecated — kept for CLI compatibility (bounds always measured when possible)",
     )
     args = parser.parse_args()
+    _ = args.no_rendered_bounds
 
     ppt = Path(args.ppt).resolve()
     if not ppt.is_file():
         print(f"Deck not found: {ppt}", file=sys.stderr)
         return 2
 
-    template = Path(args.template).resolve()
-    if not template.is_file():
-        print(f"Template not found: {template}", file=sys.stderr)
+    try:
+        template = resolve_evaluation_template(args.template or None)
+    except FileNotFoundError as exc:
+        print(f"Template not found: {exc}", file=sys.stderr)
         return 2
 
     output_dir = Path(args.output_dir).resolve() if args.output_dir else ppt.parent
+    content_json = DEFAULT_CONTENT_JSON.resolve() if DEFAULT_CONTENT_JSON.is_file() else None
 
-    result = validate_deck(
+    report = evaluate_ppt_format(
         ppt,
         template_path=template,
+        mode="deterministic",
+        content_json=content_json,
+        include_visual=False,
+    )
+    report_json, report_md = write_validation_companion_reports(
+        report,
+        ppt,
         output_dir=output_dir,
-        annotate=args.annotate,
-        use_rendered_bounds=not args.no_rendered_bounds,
+        content_json=content_json,
+        annotate=not args.no_annotate,
     )
 
-    fail_count = sum(1 for f in result.findings if f.get("severity") == "fail")
-    warn_count = sum(1 for f in result.findings if f.get("severity") == "warn")
-    print(f"deck_pass={result.deck_pass}")
-    print(f"findings={len(result.findings)} fail={fail_count} warn={warn_count}")
-    print(f"Wrote {result.report_json}")
-    print(f"Wrote {result.report_md}")
-    if result.annotation_dir:
-        print(f"Annotated images: {result.annotation_dir}")
-    return 0 if result.deck_pass else 1
+    fail_count = sum(
+        1
+        for slide in report.slides
+        for v in slide.violations
+        if v.get("source") == "deterministic" and v.get("severity") in {"critical", "major"}
+    )
+    warn_count = sum(
+        1
+        for slide in report.slides
+        for v in slide.violations
+        if v.get("source") == "deterministic" and v.get("severity") == "minor"
+    )
+    print(f"deck_pass={report.deck_pass}")
+    print(f"findings={sum(len(s.violations) for s in report.slides)} fail={fail_count} warn={warn_count}")
+    print(f"Wrote {report_json}")
+    print(f"Wrote {report_md}")
+    if not args.no_annotate:
+        print(f"Annotated images: {output_dir / 'validation'}")
+    print(
+        "Tip: run scripts/evaluate_ppt_format.py (default full mode) for "
+        "typography + layout + visual AI in one step."
+    )
+    return 0 if report.deck_pass else 1
 
 
 if __name__ == "__main__":

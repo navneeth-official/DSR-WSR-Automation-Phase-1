@@ -48,7 +48,11 @@ _OBJECTIVE_TEMPLATE = frozenset({"TITLE-01", "TITLE-02", "TITLE-03"})
 _OBJECTIVE_CONTAINER = frozenset({"KA-PLC-04"})
 
 # Measured layout rules → layout evaluation (not objective failures in user view)
-_LAYOUT_CONTAINER_FIT = frozenset({"CONT-HL-01", "CONT-SPARSE-01", "HL-SIZE-01", "KA-SIZE-01"})
+_LAYOUT_CONTAINER_FIT = frozenset({
+    "CONT-HL-01", "CONT-SPARSE-01", "HL-SIZE-01", "KA-SIZE-01",
+    "HL-TOP-WASTE-01", "HL-BOTTOM-WASTE-01", "HL-UTIL-01", "HL-WASTE-01",
+    "KA-TOP-WASTE-01", "KA-BOTTOM-WASTE-01", "KA-UTIL-01",
+})
 _LAYOUT_SECTION_GAP = frozenset({"KA-PLC-02"})
 
 # Vision categories
@@ -150,13 +154,21 @@ def _container_fit_messages(
                     "excessive unused space. Consider shrinking the Highlights table "
                     "to fit the overflow content."
                 )
-            elif rid in ("HL-SIZE-01", "CONT-SPARSE-01"):
+            elif rid in ("HL-SIZE-01", "CONT-SPARSE-01", "HL-BOTTOM-WASTE-01", "HL-WASTE-01", "HL-UTIL-01"):
                 messages.append(
                     "Highlights container contains excessive unused space."
                 )
-            elif rid == "KA-SIZE-01":
+            elif rid == "HL-TOP-WASTE-01":
+                messages.append(
+                    "Highlights container has unused empty space at the top."
+                )
+            elif rid in ("KA-SIZE-01", "KA-BOTTOM-WASTE-01", "KA-UTIL-01"):
                 messages.append(
                     "Key Activities container contains excessive unused space."
+                )
+            elif rid == "KA-TOP-WASTE-01":
+                messages.append(
+                    "Key Activities container has unused empty space at the top."
                 )
             else:
                 messages.append(str(v.get("message") or "Container sizing needs adjustment."))
@@ -545,10 +557,12 @@ def build_user_evaluation_report(
     slides_by_index = {
         int(s["slide_index"]): s for s in deck_data.get("slides", [])
     }
+    thresholds = report.thresholds
     user_slides = [
         build_slide_user_evaluation(
             slide_result,
             slides_by_index.get(slide_result.slide_index, {}),
+            thresholds=thresholds,
         )
         for slide_result in report.slides
     ]
@@ -559,6 +573,7 @@ def build_user_evaluation_report(
 
     return {
         "source_file": report.source_file,
+        "template_file": report.template_file,
         "mode": report.mode,
         "deck_pass": report.deck_pass,
         "summary": report.summary,
@@ -580,8 +595,13 @@ def format_user_evaluation_text(user_report: dict[str, Any]) -> str:
     """Human-readable business report."""
     lines = [
         f"Deck: {user_report.get('source_file', '')}",
-        f"Result: {'PASS' if user_report.get('deck_pass') else 'FAIL'}",
     ]
+    template_file = user_report.get("template_file")
+    if template_file:
+        lines.append(f"Reference template: {template_file}")
+    lines.extend([
+        f"Result: {'PASS' if user_report.get('deck_pass') else 'FAIL'}",
+    ])
     scores = user_report.get("scores") or {}
     if scores.get("overall") is not None:
         lines.append(f"Overall score: {scores['overall']}/100")

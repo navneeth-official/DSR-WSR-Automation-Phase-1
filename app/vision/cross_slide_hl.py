@@ -159,7 +159,7 @@ def build_cross_slide_hl_context(
         "main_hl_filled_paragraphs": main_hl.get("filled_paragraph_count"),
         "main_hl_waste_below_text_in": (main or {}).get("hl_waste_below_text_in"),
         "main_hl_room_below_table_in": (
-            _hl_room_below_table_to_footer(main) if main else None
+            _hl_room_below_table_to_footer(main, thresholds) if main else None
         ),
         "main_hl_below_dense_fill": (
             main_util is not None

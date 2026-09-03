@@ -2,7 +2,17 @@
   "meta": {
     "template_name": "G10X H-E-B WSR Sustainment",
     "template_file": "G10X H-E-B WSR Sustainment 05 June 2026 .pptx",
-    "version": "2.0.0",
+    "version": "2.1.0",
+    "deterministic_reference": {
+      "source": "template_scan",
+      "note": "Deterministic validation (evaluate_ppt_format / validate_deck) extracts EXPECTED typography, labels, layout thresholds, and geometry from the reference template at evaluation time via template_label_spec, template_typography, template_calibration, and template_layout_spec. This JSON does not supply hardcoded expected text or fonts for that path.",
+      "modules": [
+        "app.services.template_label_spec",
+        "app.services.template_typography",
+        "app.services.template_calibration",
+        "app.services.template_layout_spec"
+      ]
+    },
     "reference_slides": {
       "canonical_style": {
         "index": 2,
@@ -81,16 +91,14 @@
       {
         "id": "HL-HDR-01",
         "name": "Highlights bar label",
-        "description": "Row 0 cell text is exactly 'Highlights'",
-        "expected_text": "Highlights"
+        "description": "Row 0 HL header label — expected text from template_label_spec.hl_header_text",
+        "labels_source": "template_label_spec.hl_header_text"
       },
       {
         "id": "HL-HDR-02",
         "name": "Highlights header font",
-        "description": "Manrope Bold 14pt, white on dark maroon background",
-        "font_name": "Manrope",
-        "font_size_pt": 14,
-        "bold": true
+        "description": "HL header font — expected from template_typography.header",
+        "typography_source": "template_typography.header"
       },
       {
         "id": "HL-HDR-03",
@@ -129,32 +137,18 @@
         "id": "HL-P-03",
         "level": 0,
         "role": "current_week_status",
-        "description": "Current week sprint status — round bullet •",
+        "description": "Current-week status line — label text from template_label_spec.current_week_texts; typography from template_typography.roles.current_week",
         "bullet": "•",
-        "expected_text": "Current week sprint status",
-        "font_size_pt": 12,
-        "bold": false
+        "labels_source": "template_label_spec.current_week_texts",
+        "typography_source": "template_typography.roles.current_week"
       },
       {
         "id": "HL-P-04",
         "level": 7,
         "role": "category_header",
-        "description": "Story category headers — ONLY the G10X solid right-pointing arrowhead bullet (Wingdings Ø). No other bullet style is allowed.",
-        "bullet": "Ø",
-        "bullet_font": "Wingdings,Sans-Serif",
-        "bullet_visual": "solid right-pointing arrowhead (filled chevron / triangle)",
-        "bullet_unicode": "U+00D8",
-        "bullet_note": "PowerPoint stores buChar Ø with buFont Wingdings. Together they render as the black right-pointing arrowhead from the G10X template. Using Ø without Wingdings, or any other character (•, -, ₋, ▶, ➤, →), is INVALID.",
-        "forbidden_bullets": ["•", "-", "₋", "▶", "►", "➤", "→", ">"],
-        "forbidden_bullet_note": "Round bullets are for sprint lines; dashes are for story items; Unicode triangles/arrows are NOT substitutes.",
-        "font_name": "Manrope",
-        "font_size_pt": 12,
-        "bold": true,
-        "patterns": [
-          "Stories completed this week – {N} stories",
-          "Stories released for partner review – {N} stories",
-          "Stories in-progress this week – {N} stories"
-        ]
+        "description": "Story category headers — bullet spec from template_typography.category_bullet; label prefixes from template_label_spec category needles",
+        "labels_source": "template_label_spec.category_*_needles",
+        "typography_source": "template_typography.roles.category_*"
       },
       {
         "id": "HL-P-05",

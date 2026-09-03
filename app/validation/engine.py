@@ -9,14 +9,16 @@ from typing import Any
 from pptx import Presentation
 
 from app.services.ppt_format_extractor import extract_deck
+from app.services.ppt_format_reference import load_evaluation_reference
 from app.services.ppt_format_violations import (
     compute_service_chains,
     detect_slide_violations,
     terminal_slide_indices_for_chains,
 )
 from app.services.ppt_layout_metrics import EMU_PER_INCH
-from app.services.template_calibration import TemplateLayoutThresholds, load_thresholds
-from app.services.template_typography import TemplateTypographySpec, load_template_typography
+from app.services.template_calibration import TemplateLayoutThresholds
+from app.services.template_layout_spec import TemplateLayoutSpec
+from app.services.template_typography import TemplateTypographySpec
 from app.validation.annotate import annotate_findings
 from app.validation.layout_checks import detect_supplemental_layout_violations
 from app.validation.report import build_report_payload, write_json_report, write_markdown_report
@@ -38,11 +40,13 @@ def _collect_violations(
     *,
     thresholds: TemplateLayoutThresholds,
     typography: TemplateTypographySpec,
+    spacing: TemplateSpacingSpec | None = None,
+    layout_spec: TemplateLayoutSpec | None = None,
 ) -> list[dict[str, Any]]:
     violations: list[dict[str, Any]] = []
     slides = deck_data.get("slides", [])
 
-    chains = compute_service_chains(slides)
+    chains = compute_service_chains(slides, thresholds=thresholds)
     ka_terminal = terminal_slide_indices_for_chains(chains)
 
     for slide in slides:
@@ -50,6 +54,8 @@ def _collect_violations(
             slide,
             thresholds=thresholds,
             typography=typography,
+            spacing=spacing,
+            layout_spec=layout_spec,
             ka_placement_terminal_indices=ka_terminal,
         )
         existing = {str(v.get("rule_id")) for v in slide_violations}
@@ -76,14 +82,25 @@ def validate_deck(
 ) -> ValidationResult:
     ppt_path = Path(ppt_path).resolve()
     template_path = Path(template_path).resolve()
-    thresholds = thresholds or load_thresholds()
-    typography = load_template_typography(template_path)
+    reference = load_evaluation_reference(template_path, use_rendered_bounds=use_rendered_bounds)
+    thresholds = thresholds or reference.thresholds
+    typography = reference.typography
+    spacing = reference.spacing
+    layout_spec = reference.layout_spec
 
-    deck_data = extract_deck(ppt_path, use_rendered_bounds=use_rendered_bounds)
+    deck_data = extract_deck(
+        ppt_path,
+        reference_template=template_path,
+        category_bullet_spec=typography.category_bullet,
+        label_spec=reference.label_spec,
+        use_rendered_bounds=use_rendered_bounds,
+    )
     raw_violations = _collect_violations(
         deck_data,
         thresholds=thresholds,
         typography=typography,
+        spacing=spacing,
+        layout_spec=layout_spec,
     )
 
     findings = [
@@ -125,6 +142,7 @@ def validate_deck(
 
     checks_run = [
         "layout_geometry",
+        "template_layout_prototype",
         "typography_bullets",
         "hl_waste_thresholds",
         "footer_clearance",
