@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 import logging
 
 from pptx import Presentation
-from pptx.oxml.ns import qn
 
 from app.services.ppt_logo_sync import sync_header_pictures_from_reference
 from app.services.ppt_shape_utils import find_title_shape, normalize_title_text, slide_title_text
@@ -19,6 +17,7 @@ from app.wsr_engine.formatter import (
     remove_ka_from_slide,
 )
 from app.wsr_engine.hl_ka_normalizer import find_hl_only_contd_template_index, find_ka_only_contd_template_index
+from app.services.template_content_filler import set_contd_title_from_reference
 from app.wsr_engine.models import TitleFormat
 from app.wsr_engine.slide_ops import (
     clear_slide_shapes,
@@ -31,35 +30,19 @@ logger = logging.getLogger(__name__)
 
 
 def set_contd_title(slide, project_name: str, ref_title_shape, title_format: TitleFormat) -> None:
-    suffix = f"{project_name}  {title_format.contd_marker}"
-    prefix = title_format.prefix
-    sep = title_format.separator
+    """Set (Contd..) title with the same typography and position as the project's main slide."""
+    _ = project_name  # main slide reference already carries the substituted track name
+    set_contd_title_from_reference(
+        slide,
+        ref_title_shape,
+        contd_marker=title_format.contd_marker,
+    )
 
-    try:
-        title_shape = find_title_shape(slide)
-    except RuntimeError:
-        new_el = copy.deepcopy(ref_title_shape.element)
-        slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
-        title_shape = find_title_shape(slide)
 
-    ref_rPr = None
-    if ref_title_shape.has_text_frame and ref_title_shape.text_frame.paragraphs:
-        runs = ref_title_shape.text_frame.paragraphs[0].runs
-        if runs:
-            ref_rPr = runs[0]._r.find(qn("a:rPr"))
-
-    p = title_shape.text_frame.paragraphs[0]
-    if not p.runs:
-        p.add_run()
-    run = p.runs[0]
-    old_rPr = run._r.find(qn("a:rPr"))
-    if old_rPr is not None:
-        run._r.remove(old_rPr)
-    if ref_rPr is not None:
-        run._r.insert(0, copy.deepcopy(ref_rPr))
-    run.text = f"{prefix}{sep}{suffix}"
-    for extra in p.runs[1:]:
-        p._p.remove(extra._r)
+def finalize_contd_slide_title(contd_slide, main_slide, title_format: TitleFormat, project_name: str) -> None:
+    """Re-sync contd title from main after HL/KA layout — mandatory for template-agnostic decks."""
+    ref_title = find_title_shape(main_slide)
+    set_contd_title(contd_slide, project_name, ref_title, title_format)
 
 
 def find_contd_slides_for_project(prs: Presentation, project_name: str) -> list[int]:
@@ -180,6 +163,7 @@ def ensure_continuation_slides(
         sync_header_pictures_from_reference(
             template_prs.slides[template_slide_idx], contd_slide
         )
+        finalize_contd_slide_title(contd_slide, main_slide, title_format, project_name)
 
         contd_indices.append(slide_idx)
         insert_after = slide_idx
@@ -276,6 +260,7 @@ def ensure_ka_only_contd_slide(
     position_ka_at_contd_top(contd_slide, template_prs, layout_ref_slide=template_slide)
     clear_ka_on_slide(contd_slide, template_slide, service)
     sync_header_pictures_from_reference(template_slide, contd_slide)
+    finalize_contd_slide_title(contd_slide, main_slide, title_format, project_name)
 
     keep = {slide_idx}
     for idx in sorted(find_contd_slides_for_project(prs, project_name), reverse=True):
@@ -307,4 +292,5 @@ def append_ka_only_contd_slide(
     remove_hl_from_slide(contd_slide)
     position_ka_at_contd_top(contd_slide, template_prs, layout_ref_slide=template_slide)
     sync_header_pictures_from_reference(template_slide, contd_slide)
+    finalize_contd_slide_title(contd_slide, main_slide, title_format, project_name)
     return slide_idx

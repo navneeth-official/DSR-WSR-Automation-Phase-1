@@ -19,7 +19,8 @@ from app.layout.geometry_debug import (
     summarize_ref_shape,
 )
 
-from app.paths import G10X_TEMPLATE, GEOMETRY_DEBUG_LOG, SCRIPTS_DIR
+from app.paths import GEOMETRY_DEBUG_LOG, SCRIPTS_DIR
+from app.services.wsr_template import resolve_wsr_template
 
 
 @dataclass(frozen=True)
@@ -90,7 +91,7 @@ def _uds_bundle() -> tuple[Any, Presentation]:
         sys.path.insert(0, scripts)
     import update_delivery_status as uds  # noqa: WPS433
 
-    g10x_prs = Presentation(str(G10X_TEMPLATE))
+    g10x_prs = Presentation(str(resolve_wsr_template()))
     return uds, g10x_prs
 
 
@@ -103,7 +104,7 @@ class TemplateGeometryProvider:
         template_path: Path | None = None,
         log_path: Path | None = None,
     ) -> None:
-        self._template_path = template_path or G10X_TEMPLATE
+        self._template_path = template_path or resolve_wsr_template()
         if log_path is None:
             log_path = GEOMETRY_DEBUG_LOG
         configure_geometry_logging(log_path=log_path)

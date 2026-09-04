@@ -14,6 +14,7 @@ from app.services.ppt_cover_date import (
     sync_cover_slide_wsr_date,
 )
 from app.services.ppt_logo_sync import resolve_logo_reference_slide, sync_all_delivery_slide_logos
+from app.services.wsr_template import resolve_wsr_template
 from app.services.template_profile import clone_prototype_service_profile
 from app.wsr_engine.content_parser import load_content
 from app.wsr_engine.models import BuildReport, TitleFormat
@@ -180,7 +181,14 @@ def _configure_logging(verbose: bool = False) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build WSR PowerPoint (template-agnostic engine v2)")
-    parser.add_argument("--template", required=True, help="WSR template .pptx")
+    parser.add_argument(
+        "--template",
+        default="",
+        help=(
+            "Optional override WSR template .pptx. "
+            "Default: templates/wsr_template.pptx, else newest .pptx in templates/"
+        ),
+    )
     parser.add_argument("--content", required=True, help="ppt_content.json path")
     parser.add_argument("--output", required=True, help="Output .pptx path")
     parser.add_argument("--aliases", default="", help="Optional wsr_aliases.json")
@@ -190,8 +198,9 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging(args.verbose)
 
     engine = WsrEngine()
+    template = resolve_wsr_template(args.template or None)
     report = engine.run(
-        template_path=args.template,
+        template_path=template,
         content_path=args.content,
         output_path=args.output,
         aliases_path=args.aliases or None,

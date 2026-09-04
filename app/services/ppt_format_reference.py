@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.paths import GENERIC_WSR_TEMPLATE
 from app.services.ppt_format_extractor import extract_deck
 from app.services.template_calibration import (
     TemplateLayoutThresholds,
@@ -35,11 +34,7 @@ class EvaluationReference:
 
 def resolve_evaluation_template(explicit: str | Path | None = None) -> Path:
     """Pick the templates-folder reference deck for format evaluation."""
-    if explicit:
-        return resolve_wsr_template(explicit)
-    if GENERIC_WSR_TEMPLATE.is_file():
-        return GENERIC_WSR_TEMPLATE.resolve()
-    return resolve_wsr_template()
+    return resolve_wsr_template(explicit)
 
 
 def load_evaluation_reference(

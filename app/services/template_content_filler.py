@@ -388,6 +388,80 @@ def set_delivery_title_from_template(
     substitute_title_placeholders(slide, track_name)
 
 
+def visible_title_text(title_shape) -> str:
+    """First non-empty paragraph text from a delivery slide title shape."""
+    for paragraph in title_shape.text_frame.paragraphs:
+        text = paragraph.text.strip()
+        if text:
+            return text
+    return title_shape.text.strip()
+
+
+def _content_paragraph_index(title_shape) -> int:
+    for idx, paragraph in enumerate(title_shape.text_frame.paragraphs):
+        if paragraph.text.strip():
+            return idx
+    return 0
+
+
+def _replace_title_shape_element(slide, ref_title_shape):
+    """
+    Replace the delivery title shape with an exact XML copy from the main slide.
+
+    Copies position (xfrm), text-frame margins, paragraph spacing, and run styles so
+    continuation titles align identically across any template.
+    """
+    try:
+        old = find_title_shape(slide)
+    except RuntimeError:
+        new_el = copy.deepcopy(ref_title_shape.element)
+        slide.shapes._spTree.insert_element_before(new_el, "p:extLst")
+        return find_title_shape(slide)
+
+    if old.element is ref_title_shape.element:
+        return old
+
+    parent = old.element.getparent()
+    children = list(parent)
+    idx = children.index(old.element)
+    new_el = copy.deepcopy(ref_title_shape.element)
+    parent.remove(old.element)
+    parent.insert(idx, new_el)
+    return find_title_shape(slide)
+
+
+def apply_delivery_title_preserve_format(slide, text: str, ref_title_shape) -> None:
+    """
+    Set delivery slide title text while copying the main slide title shape exactly.
+
+    Uses full shape XML replacement (not text_frame.clear()) so paragraph count,
+    vertical spacing, and position match the main slide on every template.
+    """
+    title_shape = _replace_title_shape_element(slide, ref_title_shape)
+    target_idx = _content_paragraph_index(ref_title_shape)
+    paragraph = title_shape.text_frame.paragraphs[target_idx]
+    if not paragraph.runs:
+        paragraph.add_run()
+    paragraph.runs[0].text = text.strip()
+    for extra in paragraph.runs[1:]:
+        paragraph._p.remove(extra._r)
+
+
+def set_contd_title_from_reference(
+    slide,
+    ref_title_shape,
+    *,
+    contd_marker: str = "(Contd..)",
+) -> None:
+    """Build a (Contd..) title using the same font/size/color as the main slide title."""
+    base = visible_title_text(ref_title_shape)
+    if "(contd" in base.lower():
+        text = base
+    else:
+        text = f"{base}  {contd_marker}"
+    apply_delivery_title_preserve_format(slide, text, ref_title_shape)
+
+
 def fill_ka_items(ka_shape, items: list[str]) -> None:
     """Fill KA content cell bullets from template-cloned paragraphs."""
     from app.constants.ppt_mapping import KA_PLACEHOLDER_ROWS

@@ -16,7 +16,8 @@ from app.services.ppt_format_fix_planner import ALLOWED_ACTIONS
 from app.services.template_label_spec import TemplateLabelSpec, classify_paragraphs
 from app.services.ppt_layout_metrics import EMU_PER_INCH, hl_ka_tab_gap_emu
 
-from app.paths import G10X_TEMPLATE, PPT_BUILDER, REPO_ROOT, SCRIPTS_DIR
+from app.paths import PPT_BUILDER, REPO_ROOT, SCRIPTS_DIR
+from app.services.wsr_template import resolve_wsr_template
 SPARSE_WASTE_FORCE_TIGHT_IN = 0.5
 _HL_BOTTOM_TOLERANCE_EMU = 45720  # ~0.05 in
 
@@ -510,7 +511,7 @@ def apply_fix_plan(
     rebuild_with_hints are collected and run once at the end if content_json given.
     """
     uds = _import_uds()
-    g10x_file = g10x_path or G10X_TEMPLATE
+    g10x_file = g10x_path or resolve_wsr_template()
     g10x_prs = Presentation(str(g10x_file))
     prs = Presentation(str(ppt_path))
 

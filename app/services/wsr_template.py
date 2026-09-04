@@ -1,4 +1,4 @@
-"""Resolve active WSR template path."""
+"""Resolve active WSR template path from templates/ only."""
 
 from __future__ import annotations
 
@@ -7,12 +7,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.paths import G10X_TEMPLATE, REPO_ROOT, TEMPLATES_DIR
+from app.paths import REPO_ROOT, TEMPLATES_DIR
 
 load_dotenv(REPO_ROOT / ".env")
 
 WSR_TEMPLATE_FILENAME = "wsr_template.pptx"
-LEGACY_G10X_TEMPLATE_NAME = G10X_TEMPLATE.name
 
 _active_template: Path | None = None
 
@@ -30,7 +29,11 @@ def list_templates_folder_pptx() -> list[Path]:
 
 
 def resolve_default_wsr_template() -> Path:
-    """Pick template: wsr_template.pptx, else newest file in templates/, else legacy default."""
+    """
+    Pick the active WSR template from templates/:
+      1. templates/wsr_template.pptx (optional stable alias)
+      2. Newest .pptx in templates/
+    """
     primary = TEMPLATES_DIR / WSR_TEMPLATE_FILENAME
     if primary.is_file():
         return primary.resolve()
@@ -38,9 +41,6 @@ def resolve_default_wsr_template() -> Path:
     folder_templates = list_templates_folder_pptx()
     if folder_templates:
         return folder_templates[0]
-
-    if G10X_TEMPLATE.is_file():
-        return G10X_TEMPLATE.resolve()
 
     raise FileNotFoundError(
         f"No WSR template found. Drop a .pptx into {TEMPLATES_DIR} "
@@ -54,6 +54,7 @@ def set_active_wsr_template(path: Path | str | None) -> None:
 
 
 def resolve_wsr_template(explicit: Path | str | None = None) -> Path:
+    """Resolve WSR template: explicit path, session override, env, or templates/ default."""
     if explicit:
         p = Path(explicit).resolve()
         if not p.is_file():

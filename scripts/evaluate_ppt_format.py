@@ -33,7 +33,6 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from app.paths import (  # noqa: E402
     DEFAULT_CONTENT_JSON,
-    GENERIC_WSR_TEMPLATE,
     evaluation_ai_report_paths,
     evaluation_report_paths,
 )
@@ -92,8 +91,8 @@ def main() -> None:
         "--template",
         default="",
         help=(
-            "Reference WSR template .pptx in templates/ "
-            f"(default: {GENERIC_WSR_TEMPLATE.name} when present, else newest template)"
+            "Optional override reference WSR template .pptx. "
+            "Default: templates/wsr_template.pptx, else newest .pptx in templates/"
         ),
     )
     parser.add_argument(

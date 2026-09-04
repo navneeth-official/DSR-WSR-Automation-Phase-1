@@ -29,7 +29,7 @@ def main() -> int:
     parser.add_argument(
         "--template",
         default="",
-        help="Reference WSR template .pptx in templates/ (default: Generic Template)",
+        help="Optional override reference WSR template (default: newest .pptx in templates/)",
     )
     parser.add_argument(
         "--output-dir",

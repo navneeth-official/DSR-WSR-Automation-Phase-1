@@ -8,15 +8,16 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.paths import GENERIC_WSR_TEMPLATE
+from app.services.wsr_template import resolve_wsr_template
 from app.services.ppt_format_extractor import extract_deck
 from app.services.ppt_format_reference import load_evaluation_reference
 from app.services.ppt_hl_typography import detect_hl_typography_violations
 
-ref = load_evaluation_reference(GENERIC_WSR_TEMPLATE, use_rendered_bounds=False)
+template = resolve_wsr_template()
+ref = load_evaluation_reference(template, use_rendered_bounds=False)
 deck = extract_deck(
     "output/HEB_Delivery_Status.pptx",
-    reference_template=GENERIC_WSR_TEMPLATE,
+    reference_template=template,
     category_bullet_spec=ref.typography.category_bullet,
 )
 

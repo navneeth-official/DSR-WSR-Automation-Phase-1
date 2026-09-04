@@ -30,7 +30,8 @@ from app.services.ppt_format_repair import (
     tighten_hl_and_position_ka,
 )
 
-from app.paths import G10X_TEMPLATE, SCRIPTS_DIR
+from app.paths import SCRIPTS_DIR
+from app.services.wsr_template import resolve_wsr_template
 
 
 def _uds_helpers():
@@ -41,7 +42,7 @@ def _uds_helpers():
 
     from pptx import Presentation as Prs
 
-    g10x_prs = Prs(str(G10X_TEMPLATE))
+    g10x_prs = Prs(str(resolve_wsr_template()))
     return uds, g10x_prs
 
 

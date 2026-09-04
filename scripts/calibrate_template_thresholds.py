@@ -10,7 +10,7 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
-from app.paths import G10X_TEMPLATE
+from app.services.wsr_template import resolve_wsr_template
 from app.services.ppt_format_extractor import extract_deck
 from app.services.template_calibration import (
     APPROVED_DECK_PATH,
@@ -38,7 +38,7 @@ def main() -> None:
 
     ppt = Path(args.ppt)
     if not ppt.is_file():
-        fallback = G10X_TEMPLATE
+        fallback = resolve_wsr_template()
         if not fallback.is_file():
             raise SystemExit(f"PPT not found: {ppt}")
         ppt = fallback

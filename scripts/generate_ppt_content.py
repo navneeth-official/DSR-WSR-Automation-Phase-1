@@ -5,7 +5,8 @@ Usage:
     python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13
     python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --save-titles
     python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --json-only
-    python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --regenerate-titles
+
+Template: omit --template to use the newest .pptx in templates/ (or templates/wsr_template.pptx).
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ from app.paths import (
     DEFAULT_CONTENT_JSON,
     DEFAULT_CONTENT_PREVIEW,
     DEFAULT_PPT_OUTPUT,
-    G10X_TEMPLATE,
     OUTPUT_DIR,
     PPT_BUILDER,
     REPO_ROOT,
@@ -69,8 +69,9 @@ def build_ppt_deck(
 
     if not PPT_BUILDER.is_file():
         raise FileNotFoundError(f"PPT builder not found: {PPT_BUILDER}")
-    if not G10X_TEMPLATE.is_file():
-        raise FileNotFoundError(f"G10X template not found: {G10X_TEMPLATE}")
+    tpl = resolve_wsr_template(template)
+    if not tpl.is_file():
+        raise FileNotFoundError(f"WSR template not found: {tpl}")
 
     cmd = [
         sys.executable,
@@ -125,8 +126,8 @@ def main() -> None:
         type=str,
         default="",
         help=(
-            "WSR template .pptx (v2 engine). Default: templates/wsr_template.pptx, "
-            "else the newest .pptx in templates/"
+            "Optional override WSR template .pptx. "
+            "Default: templates/wsr_template.pptx, else newest .pptx in templates/"
         ),
     )
     parser.add_argument(
