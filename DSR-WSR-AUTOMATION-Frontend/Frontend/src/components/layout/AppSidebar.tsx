@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Ticket, Upload } from "lucide-react";
+import { ChevronDown, LogOut, Ticket, Upload } from "lucide-react";
 import g10xLogo from "@/assets/g10x-logo.png";
 
 type AppPage = "intake" | "complete-stories" | "view-dsr" | "wsr-generate" | "wsr-view";
@@ -20,6 +20,8 @@ interface AppSidebarProps {
   setSelectedDsrTrackId: (id: string) => void;
   dsrTrackList: DsrTrack[];
   onRefreshTracks: () => void;
+  authUser: string;
+  onLogout: () => void;
 }
 
 const COLLAPSE_DELAY_MS = 400;
@@ -52,6 +54,8 @@ export function AppSidebar({
   setSelectedDsrTrackId,
   dsrTrackList,
   onRefreshTracks,
+  authUser,
+  onLogout,
 }: AppSidebarProps) {
   const [expanded, setExpanded] = useState(false);
   const collapseTimerRef = useRef<number | null>(null);
@@ -342,6 +346,30 @@ export function AppSidebar({
             </div>
           </div>
         </nav>
+
+        <div className="flex-shrink-0 border-t border-white/10 py-3">
+          <div
+            className={`mb-1 overflow-hidden px-3 transition-[opacity,max-height] duration-200 ${
+              expanded ? "max-h-8 opacity-100" : "max-h-0 opacity-0"
+            }`}
+          >
+            <p className="truncate text-[10px] uppercase tracking-wide text-white/35">
+              Signed in
+            </p>
+            <p className="truncate text-xs font-medium text-white/70" title={authUser}>
+              {authUser}
+            </p>
+          </div>
+          <button
+            type="button"
+            title="Sign out"
+            onClick={onLogout}
+            className={navBtnClass(false)}
+          >
+            {iconSlot(<LogOut className="h-4 w-4 flex-shrink-0" />)}
+            <span className={labelClass()}>Sign out</span>
+          </button>
+        </div>
       </aside>
     </>
   );

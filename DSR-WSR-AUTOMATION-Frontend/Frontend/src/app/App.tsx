@@ -20,8 +20,12 @@ import {
   updateStory,
   type JiraStoryRecord,
 } from "@/api/stories";
+import { clearLegacyAuthStorage } from "@/auth/session";
+import { useSessionInactivity } from "@/auth/useSessionInactivity";
 import { RovoRequestSidebar } from "@/components/intake/RovoRequestSidebar";
 import { AppSidebar } from "@/components/layout/AppSidebar";
+import { LoginPage } from "@/components/LoginPage";
+import { SignupPage } from "@/components/SignUpPage";
 import { WSRReportPanel } from "@/components/WSRReportPanel";
 import { WSRTemplateSelector } from "@/components/WSRTemplateSelector";
 import { ViewWSRPage } from "@/components/ViewWSRPage";
@@ -3579,6 +3583,9 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
 }
 
 export default function App() {
+  // In-memory only — refresh always returns to the login screen
+  const [authUser, setAuthUser] = useState<string | null>(null);
+  const [authScreen, setAuthScreen] = useState<"login" | "signup">("login");
   const [page, setPage] = useState<Page>("intake");
   const initialBundle = loadFromStorage();
 
@@ -3600,8 +3607,31 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    clearLegacyAuthStorage();
+  }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
     void refreshTrackCatalog();
-  }, [refreshTrackCatalog]);
+  }, [authUser, refreshTrackCatalog]);
+
+  const handleLoginSuccess = useCallback((username: string) => {
+    setAuthUser(username);
+    setAuthScreen("login");
+  }, []);
+
+  const handleSignupSuccess = useCallback((username: string) => {
+    setAuthUser(username);
+    setAuthScreen("login");
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    setAuthUser(null);
+    setAuthScreen("login");
+    setPage("intake");
+  }, []);
+
+  useSessionInactivity(Boolean(authUser), handleLogout);
 
   const dsrTrackList = useMemo(
     () =>
@@ -3630,6 +3660,24 @@ export default function App() {
     void refreshTrackCatalog();
   };
 
+  if (!authUser) {
+    if (authScreen === "signup") {
+      return (
+        <SignupPage
+          onSuccess={handleSignupSuccess}
+          onNavigateToLogin={() => setAuthScreen("login")}
+        />
+      );
+    }
+
+    return (
+      <LoginPage
+        onSuccess={handleLoginSuccess}
+        onNavigateToSignup={() => setAuthScreen("signup")}
+      />
+    );
+  }
+
   return (
     <div className="flex h-screen bg-brand-cream font-[Inter,sans-serif]">
       <AppSidebar
@@ -3648,6 +3696,8 @@ export default function App() {
         onRefreshTracks={() => {
           void refreshTrackCatalog();
         }}
+        authUser={authUser}
+        onLogout={handleLogout}
       />
 
       {/* Main */}
