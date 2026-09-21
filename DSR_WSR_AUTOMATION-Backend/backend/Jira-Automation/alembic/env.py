@@ -3,7 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 
 from app.database import Base, engine
-from app.models import employee, jira_story, project, sprint, team  # noqa: F401
+from app.models import employee, jira_story, project, sprint, team, user  # noqa: F401
 
 config = context.config
 

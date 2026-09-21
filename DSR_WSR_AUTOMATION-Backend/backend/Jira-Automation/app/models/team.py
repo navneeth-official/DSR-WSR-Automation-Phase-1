@@ -8,6 +8,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.employee import Employee
+    from app.models.user import User
 
 
 class Team(Base):
@@ -31,6 +32,7 @@ class Team(Base):
     )
 
     employees: Mapped[list["Employee"]] = relationship(back_populates="team")
+    users: Mapped[list["User"]] = relationship(back_populates="team")
 
     def __repr__(self) -> str:
         return f"<Team(id={self.team_id}, name={self.team_name!r})>"
