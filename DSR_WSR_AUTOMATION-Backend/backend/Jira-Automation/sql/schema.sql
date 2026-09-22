@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS users (
     username        VARCHAR(100)  NOT NULL UNIQUE,
     password_hash   VARCHAR(255)  NOT NULL,
     team_id         INTEGER       NOT NULL REFERENCES teams (team_id) ON DELETE RESTRICT,
+    is_pmo          BOOLEAN       NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );

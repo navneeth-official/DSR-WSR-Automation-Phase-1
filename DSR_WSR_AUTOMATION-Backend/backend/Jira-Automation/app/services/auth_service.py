@@ -53,6 +53,7 @@ class AuthService:
             username=username,
             password_hash=hash_password(body.password),
             team_id=team.team_id,
+            is_pmo=body.is_pmo,
         )
 
         # Mirror signup into employees so the person is visible under their team.
@@ -68,6 +69,7 @@ class AuthService:
             username=user.username,
             team_id=user.team_id,
             team_name=user.team.team_name,
+            is_pmo=user.is_pmo,
         )
 
     def login(self, body: LoginRequest) -> AuthUserResponse:
@@ -81,4 +83,5 @@ class AuthService:
             username=user.username,
             team_id=user.team_id,
             team_name=user.team.team_name,
+            is_pmo=user.is_pmo,
         )
