@@ -95,6 +95,9 @@ export interface WsrWeekSummary {
   slide_count: number;
   thumbnail_url: string | null;
   download_url: string;
+  /** SharePoint / OneDrive / Google Drive web link (if uploaded) */
+  cloud_web_url?: string | null;
+  cloud_provider?: string | null;
 }
 
 export interface WsrWeekListResponse {

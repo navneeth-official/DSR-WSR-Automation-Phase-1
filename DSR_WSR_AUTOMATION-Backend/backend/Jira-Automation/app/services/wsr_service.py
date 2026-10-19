@@ -16,7 +16,10 @@ from app.services.cloud_upload_service import (
     cloud_response_fields,
     cloud_response_fields_from_upload,
     try_upload_wsr_ppt,
+    resolve_cloud_provider,
 )
+from app.services.onedrive_upload_service import load_onedrive_web_url
+from app.services.sharepoint_upload_service import load_sharepoint_web_url
 from app.services.wsr_template_upload_service import resolve_template_path
 from app.services.wsr_variant_service import (
     WSR_PPTX_RE,
@@ -216,6 +219,16 @@ def list_generated_wsr_weeks() -> list[dict]:
                     paths.ppt_path.stat().st_mtime
                 ).isoformat()
 
+            # Resolve the cloud upload URL for this variant (SharePoint / OneDrive)
+            _start_date_obj = date.fromisoformat(start_s)
+            _end_date_obj = date.fromisoformat(end_s)
+            _active_provider = resolve_cloud_provider()
+            _cloud_web_url: str | None = None
+            if _active_provider == "sharepoint":
+                _cloud_web_url = load_sharepoint_web_url(_start_date_obj, _end_date_obj)
+            elif _active_provider == "onedrive":
+                _cloud_web_url = load_onedrive_web_url(_start_date_obj, _end_date_obj)
+
             weeks.append(
                 {
                     "report_start_date": start_s,
@@ -232,6 +245,8 @@ def list_generated_wsr_weeks() -> list[dict]:
                         f"/api/wsr/download?start_date={start_s}&end_date={end_s}"
                         f"&variant={variant}"
                     ),
+                    "cloud_web_url": _cloud_web_url,
+                    "cloud_provider": _active_provider if _cloud_web_url else None,
                 }
             )
 

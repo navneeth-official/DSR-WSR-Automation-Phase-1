@@ -1,14 +1,16 @@
 import { useState, type FormEvent } from "react";
-import { AlertCircle, Lock, User } from "lucide-react";
+import { AlertCircle, CheckCircle2, Lock, User } from "lucide-react";
 import g10xLogo from "@/assets/g10x-logo.png";
-import { validateCredentials } from "@/auth/users";
+import { loginUser, type AuthUser } from "@/api/auth";
 
 interface LoginPageProps {
-  onSuccess: (username: string) => void;
+  onSuccess: (user: AuthUser) => void;
   onNavigateToSignup?: () => void;
+  /** Optional success message shown after signup redirect */
+  successMessage?: string;
 }
 
-export function LoginPage({ onSuccess, onNavigateToSignup }: LoginPageProps) {
+export function LoginPage({ onSuccess, onNavigateToSignup, successMessage }: LoginPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -24,14 +26,14 @@ export function LoginPage({ onSuccess, onNavigateToSignup }: LoginPageProps) {
     }
 
     setSubmitting(true);
-    window.setTimeout(() => {
-      if (validateCredentials(username, password)) {
-        onSuccess(username.trim());
-      } else {
-        setError("Invalid username or password.");
+    loginUser({ username: username.trim(), password })
+      .then((user) => {
+        onSuccess(user);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Invalid username or password.");
         setSubmitting(false);
-      }
-    }, 150);
+      });
   };
 
   return (
@@ -69,6 +71,12 @@ export function LoginPage({ onSuccess, onNavigateToSignup }: LoginPageProps) {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5 px-6 py-6">
+              {successMessage ? (
+                <div className="flex items-start gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2.5 text-xs text-green-200">
+                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-green-400" />
+                  <span>{successMessage}</span>
+                </div>
+              ) : null}
               <div className="space-y-1.5">
                 <label
                   htmlFor="login-username"

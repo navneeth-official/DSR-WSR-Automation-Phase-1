@@ -44,16 +44,32 @@ class Settings:
     azure_openai_model: str = os.getenv("AZURE_OPENAI_MODEL", "gpt-4o-mini")
     azure_openai_vision_model: str = os.getenv("AZURE_OPENAI_VISION_MODEL", "")
 
-    # Microsoft Entra app (personal OneDrive upload via Graph — delegated MSAL)
+    # Microsoft Entra app — shared by OneDrive (delegated) and SharePoint (app-only)
     azure_client_id: str = os.getenv("AZURE_CLIENT_ID", "")
     azure_tenant_id: str = os.getenv("AZURE_TENANT_ID", "")
     azure_authority: str = os.getenv("AZURE_AUTHORITY", "")
+    # Client secret — used for app-only / unattended SharePoint uploads
+    azure_client_secret: str = os.getenv("AZURE_CLIENT_SECRET", "")
+    azure_client_secret_id: str = os.getenv("AZURE_CLIENT_SECRET_ID", "")
+
+    # Personal OneDrive upload (delegated device-code MSAL)
     onedrive_upload_folder: str = os.getenv("ONEDRIVE_UPLOAD_FOLDER", "WSR")
     onedrive_upload_enabled: bool = os.getenv(
         "ONEDRIVE_UPLOAD_ENABLED", ""
     ).lower() in ("1", "true", "yes")
 
-    # Cloud upload provider: google_drive | onedrive | (empty = use *_UPLOAD_ENABLED flags)
+    # SharePoint shared library (app-only client-secret MSAL — unattended)
+    sharepoint_upload_enabled: bool = os.getenv(
+        "SHAREPOINT_UPLOAD_ENABLED", ""
+    ).lower() in ("1", "true", "yes")
+    sharepoint_site_id: str = os.getenv("SHAREPOINT_SITE_ID", "")
+    sharepoint_upload_folder: str = os.getenv(
+        "SHAREPOINT_UPLOAD_FOLDER", "Shared Documents/WSR"
+    )
+    # Optional: explicit drive ID — blank → use site's default document library
+    sharepoint_drive_id: str = os.getenv("SHAREPOINT_DRIVE_ID", "")
+
+    # Cloud upload provider: google_drive | onedrive | sharepoint | (empty = use *_UPLOAD_ENABLED flags)
     cloud_upload_provider: str = os.getenv("CLOUD_UPLOAD_PROVIDER", "")
 
     # Google Drive upload via Drive API v3 (OAuth desktop client)

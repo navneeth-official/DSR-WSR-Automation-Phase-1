@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Download, ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Loader2, Presentation, RefreshCw } from "lucide-react";
 import {
   checkWsrGeneration,
-  fetchWsrPreviewSlides,
+  // fetchWsrPreviewSlides, // MIGHT BE USED IN FUTURE — slide preview fetching for in-browser viewer
   fetchWsrWeek,
   startWsrJob,
   waitForWsrJob,
   wsrDownloadUrl,
   type WsrGenerateResponse,
-  type WsrPreviewSlide,
+  // type WsrPreviewSlide, // MIGHT BE USED IN FUTURE
 } from "@/api/wsr";
 import { WSRPptEditor } from "@/components/ppt-editor/WSRPptEditor";
-import { WSRPptViewer } from "@/components/WSRPptViewer";
+// import { WSRPptViewer } from "@/components/WSRPptViewer"; // MIGHT BE USED IN FUTURE — in-browser slide viewer with thumbnail rail
 import { FloatingNotice, useFloatingNotice } from "@/components/ui/FloatingNotice";
 import { VariantRibbon, variantBadgeLabel } from "@/components/wsr/VariantRibbon";
 
@@ -56,10 +56,11 @@ export function WSRReportPanel({
     show: showVariantNotice,
     dismiss: dismissVariantNotice,
   } = useFloatingNotice();
-  const [previewError, setPreviewError] = useState("");
+  // MIGHT BE USED IN FUTURE — previewError / previewSlides / previewLoading for in-browser WSRPptViewer
+  // const [previewError, setPreviewError] = useState("");
+  // const [previewSlides, setPreviewSlides] = useState<WsrPreviewSlide[]>([]);
+  // const [previewLoading, setPreviewLoading] = useState(false);
   const [result, setResult] = useState<WsrGenerateResponse | null>(null);
-  const [previewSlides, setPreviewSlides] = useState<WsrPreviewSlide[]>([]);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [deckReloadKey, setDeckReloadKey] = useState(0);
   const [activeVariant, setActiveVariant] = useState(variant);
 
@@ -120,7 +121,7 @@ export function WSRReportPanel({
     setError("");
     setDuplicateAlert("");
     dismissVariantNotice();
-    setPreviewError("");
+    // setPreviewError(""); // MIGHT BE USED IN FUTURE
     setLoading(true);
     setLoadingMessage("Loading WSR deck…");
     setActiveVariant(variant);
@@ -205,56 +206,36 @@ export function WSRReportPanel({
     };
   }, [startDate, endDate, autoGenerate, alwaysRegenerate, templateId, variant, dismissVariantNotice, showVariantNotice]);
 
-  useEffect(() => {
-    if (mode !== "viewer" || !result) {
-      setPreviewSlides([]);
-      setPreviewError("");
-      setPreviewLoading(false);
-      return;
-    }
-
-    if (result.preview_slides.length > 0) {
-      setPreviewSlides(result.preview_slides);
-      setPreviewError("");
-      setPreviewLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setPreviewSlides([]);
-    setPreviewError("");
-    setPreviewLoading(true);
-    void (async () => {
-      try {
-        const slides = await fetchWsrPreviewSlides(startDate, endDate, activeVariant);
-        if (!cancelled) {
-          setPreviewSlides(slides);
-          if (slides.length === 0) {
-            setPreviewError(
-              "Slide previews could not be generated for this deck. Try Regenerate, or download the PPT.",
-            );
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setPreviewSlides([]);
-          setPreviewError(
-            err instanceof Error
-              ? err.message
-              : "Slide previews are unavailable for this deck.",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setPreviewLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mode, result, startDate, endDate, activeVariant]);
+  /*
+   * MIGHT BE USED IN FUTURE — preview-slide loading effect for the in-browser WSRPptViewer.
+   * When re-enabling the deck viewer panel, restore this useEffect and the related state
+   * (previewSlides, previewLoading, previewError) as well as the fetchWsrPreviewSlides import.
+   *
+   * useEffect(() => {
+   *   if (mode !== "viewer" || !result) {
+   *     setPreviewSlides([]); setPreviewError(""); setPreviewLoading(false); return;
+   *   }
+   *   if (result.preview_slides.length > 0) {
+   *     setPreviewSlides(result.preview_slides); setPreviewError(""); setPreviewLoading(false); return;
+   *   }
+   *   let cancelled = false;
+   *   setPreviewSlides([]); setPreviewError(""); setPreviewLoading(true);
+   *   void (async () => {
+   *     try {
+   *       const slides = await fetchWsrPreviewSlides(startDate, endDate, activeVariant);
+   *       if (!cancelled) {
+   *         setPreviewSlides(slides);
+   *         if (slides.length === 0) setPreviewError("Slide previews could not be generated…");
+   *       }
+   *     } catch (err) {
+   *       if (!cancelled) { setPreviewSlides([]); setPreviewError(err instanceof Error ? err.message : "Unavailable"); }
+   *     } finally {
+   *       if (!cancelled) setPreviewLoading(false);
+   *     }
+   *   })();
+   *   return () => { cancelled = true; };
+   * }, [mode, result, startDate, endDate, activeVariant]);
+   */
 
   const downloadUrl =
     result?.download_url ?? wsrDownloadUrl(startDate, endDate, activeVariant);
@@ -262,9 +243,11 @@ export function WSRReportPanel({
   const cloudOpenLabel =
     result?.cloud_provider === "google_drive"
       ? "Open in Google Drive"
-      : result?.cloud_provider === "onedrive"
-        ? "Open in OneDrive"
-        : "Open in cloud";
+      : result?.cloud_provider === "sharepoint"
+        ? "Open in SharePoint"
+        : result?.cloud_provider === "onedrive"
+          ? "Open in OneDrive"
+          : "Open in cloud";
 
   return (
     <div className="relative flex flex-col h-full min-h-0 bg-brand-cream">
@@ -410,39 +393,87 @@ export function WSRReportPanel({
         {!loading && !error && result && (
           <div className="h-full min-h-0">
             {mode === "viewer" ? (
-              previewLoading && previewSlides.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                  <Loader2 className="w-8 h-8 text-brand-red animate-spin mb-3" />
-                  <p className="text-sm font-medium text-gray-700">Loading slide previews…</p>
-                  <p className="text-xs text-gray-400 mt-1 max-w-md">
-                    Rendering thumbnails from the generated deck.
-                  </p>
+              /*
+               * Deck viewer: open the file directly in SharePoint (or download as fallback).
+               * The in-browser slide preview (WSRPptViewer with thumbnail rail) is commented out below.
+               * MIGHT BE USED IN FUTURE — restore WSRPptViewer block to re-enable in-browser viewing.
+               */
+              cloudUrl ? (
+                <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-4">
+                  <Presentation className="w-14 h-14 text-blue-500" />
+                  <div>
+                    <p className="text-base font-semibold text-gray-800">WSR Deck ready</p>
+                    <p className="text-xs text-gray-500 mt-1 max-w-sm">
+                      This deck has been uploaded to SharePoint. Click below to open it directly in
+                      your browser.
+                    </p>
+                  </div>
+                  <a
+                    href={cloudUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors shadow"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Open in SharePoint
+                  </a>
+                  <a
+                    href={downloadUrl}
+                    download={result.filename}
+                    className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 underline"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Or download the PPT locally
+                  </a>
                 </div>
-              ) : previewSlides.length > 0 ? (
-                <WSRPptViewer
-                  previewSlides={previewSlides}
-                  filename={result.filename}
-                />
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                  <p className="text-sm font-medium text-gray-700">
-                    Slide previews are not available
-                  </p>
-                  <p className="text-xs text-gray-500 mt-2 max-w-md">
-                    {previewError ||
-                      "Download the PPT to view the generated deck, or click Regenerate to rebuild previews."}
-                  </p>
-                  {showRegenerate && (
-                    <button
-                      type="button"
-                      onClick={() => void runGenerate(true)}
-                      className="mt-4 text-xs font-semibold text-brand-red underline"
-                    >
-                      Regenerate WSR
-                    </button>
-                  )}
+                /* No cloud URL: offer download as fallback */
+                <div className="flex flex-col items-center justify-center h-full text-center px-6 gap-4">
+                  <Presentation className="w-14 h-14 text-gray-300" />
+                  <div>
+                    <p className="text-base font-semibold text-gray-800">WSR Deck ready</p>
+                    <p className="text-xs text-gray-500 mt-1 max-w-sm">
+                      No SharePoint link is available for this deck yet. Download the PPT file to
+                      view it, or regenerate to trigger an upload.
+                    </p>
+                  </div>
+                  <a
+                    href={downloadUrl}
+                    download={result.filename}
+                    className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-brand-orange rounded-lg hover:bg-brand-orange-hover transition-colors shadow"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download PPT
+                  </a>
                 </div>
               )
+              /*
+               * MIGHT BE USED IN FUTURE — in-browser slide viewer with thumbnail rail.
+               * Replace the cloudUrl block above with the code below to restore the viewer.
+               *
+               * previewLoading && previewSlides.length === 0 ? (
+               *   <div className="flex flex-col items-center justify-center h-full text-center px-6">
+               *     <Loader2 className="w-8 h-8 text-brand-red animate-spin mb-3" />
+               *     <p className="text-sm font-medium text-gray-700">Loading slide previews…</p>
+               *     <p className="text-xs text-gray-400 mt-1 max-w-md">Rendering thumbnails from the generated deck.</p>
+               *   </div>
+               * ) : previewSlides.length > 0 ? (
+               *   <WSRPptViewer previewSlides={previewSlides} filename={result.filename} />
+               * ) : (
+               *   <div className="flex flex-col items-center justify-center h-full text-center px-6">
+               *     <p className="text-sm font-medium text-gray-700">Slide previews are not available</p>
+               *     <p className="text-xs text-gray-500 mt-2 max-w-md">
+               *       {previewError || "Download the PPT to view the deck, or click Regenerate to rebuild previews."}
+               *     </p>
+               *     {showRegenerate && (
+               *       <button type="button" onClick={() => void runGenerate(true)}
+               *         className="mt-4 text-xs font-semibold text-brand-red underline">
+               *         Regenerate WSR
+               *       </button>
+               *     )}
+               *   </div>
+               * )
+               */
             ) : (
               <WSRPptEditor
                 key={`${startDate}-${endDate}-${deckReloadKey}`}

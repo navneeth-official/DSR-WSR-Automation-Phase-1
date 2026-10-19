@@ -21,6 +21,7 @@ interface AppSidebarProps {
   dsrTrackList: DsrTrack[];
   onRefreshTracks: () => void;
   authUser: string;
+  isPmo: boolean;
   onLogout: () => void;
 }
 
@@ -55,6 +56,7 @@ export function AppSidebar({
   dsrTrackList,
   onRefreshTracks,
   authUser,
+  isPmo,
   onLogout,
 }: AppSidebarProps) {
   const [expanded, setExpanded] = useState(false);
@@ -356,9 +358,16 @@ export function AppSidebar({
             <p className="truncate text-[10px] uppercase tracking-wide text-white/35">
               Signed in
             </p>
-            <p className="truncate text-xs font-medium text-white/70" title={authUser}>
-              {authUser}
-            </p>
+            <div className="flex items-center gap-1.5">
+              <p className="truncate text-xs font-medium text-white/70" title={authUser}>
+                {authUser}
+              </p>
+              {isPmo && (
+                <span className="flex-shrink-0 rounded px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-brand-red/80 text-white">
+                  PMO
+                </span>
+              )}
+            </div>
           </div>
           <button
             type="button"

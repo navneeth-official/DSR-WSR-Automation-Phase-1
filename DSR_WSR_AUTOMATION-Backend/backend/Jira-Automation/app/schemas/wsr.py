@@ -66,6 +66,9 @@ class WsrWeekSummary(BaseModel):
     slide_count: int = 0
     thumbnail_url: str | None = None
     download_url: str
+    # Cloud upload URL (SharePoint / OneDrive / Google Drive web link)
+    cloud_web_url: str | None = None
+    cloud_provider: str | None = None
 
 
 class WsrWeekListResponse(BaseModel):

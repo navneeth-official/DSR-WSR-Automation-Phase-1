@@ -71,11 +71,18 @@ function VerticalTabRail({
   activeTab,
   open,
   onSelectTab,
+  isPmo,
 }: {
   activeTab: SidebarTab;
   open: boolean;
   onSelectTab: (tab: SidebarTab) => void;
+  isPmo: boolean;
 }) {
+  /** PMO-only tabs; non-PMO users see only the "rovo" tab */
+  const visibleTabs = TAB_CONFIG.filter(
+    (t) => t.id === "rovo" || isPmo,
+  );
+
   return (
     <div
       className={`flex flex-col flex-shrink-0 overflow-hidden bg-brand-black border border-brand-black ${
@@ -84,7 +91,7 @@ function VerticalTabRail({
           : "rounded-l-lg shadow-[0_0_0_1px_rgba(0,0,0,0.2),_-8px_0_24px_rgba(0,0,0,0.25),_0_8px_20px_rgba(0,0,0,0.15)]"
       }`}
     >
-      {TAB_CONFIG.map((tab) => {
+      {visibleTabs.map((tab) => {
         const isActive = open && activeTab === tab.id;
         return (
           <button
@@ -243,9 +250,11 @@ function RovoPanel({
 export function RovoRequestSidebar({
   trackCatalog,
   onTracksChanged,
+  isPmo,
 }: {
   trackCatalog: TrackListItem[];
   onTracksChanged: () => void;
+  isPmo: boolean;
 }) {
   const today = useMemo(() => {
     const d = new Date();
@@ -348,6 +357,8 @@ export function RovoRequestSidebar({
   }, [requestText]);
 
   const selectTab = (tab: SidebarTab) => {
+    // Non-PMO users can only access the rovo tab
+    if (!isPmo && tab !== "rovo") return;
     setActiveTab(tab);
     setOpen(true);
   };
@@ -380,7 +391,7 @@ export function RovoRequestSidebar({
       ) : null}
 
       <div ref={sidebarRootRef} className="relative z-40 flex items-center h-full pointer-events-auto">
-        <VerticalTabRail activeTab={activeTab} open={open} onSelectTab={selectTab} />
+        <VerticalTabRail activeTab={activeTab} open={open} onSelectTab={selectTab} isPmo={isPmo} />
 
         {open && (
           <aside className="relative h-full w-[min(calc(100vw-2.75rem),380px)] flex flex-col min-h-0 bg-white border border-gray-300 border-l-0 rounded-r-none shadow-[-12px_0_32px_rgba(15,23,42,0.16),_0_0_0_1px_rgba(15,23,42,0.06)]">

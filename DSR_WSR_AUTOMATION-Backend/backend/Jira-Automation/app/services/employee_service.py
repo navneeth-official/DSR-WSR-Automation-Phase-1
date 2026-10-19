@@ -200,15 +200,43 @@ def _flatten_employee_tracks(
     *,
     active_only: bool,
 ) -> list[EmployeeTrackResponse]:
+    """Flatten employees → assignment rows.
+
+    Employees with NO track assignments are always included (with null track
+    fields) unless active_only=True is requested, so newly signed-up users
+    appear in the Create/Edit assignees picker immediately after signup.
+    """
     rows: list[EmployeeTrackResponse] = []
     for employee in employees:
-        for assignment in employee.track_assignments:
+        assignments = list(employee.track_assignments)
+
+        if not assignments:
+            # No tracks yet (e.g. newly signed-up user).
+            # Exclude from active_only queries; include in all-employees queries.
+            if not active_only:
+                rows.append(
+                    EmployeeTrackResponse(
+                        employee_id=employee.employee_id,
+                        employee_name=employee.employee_name,
+                        team_id=employee.team.team_id,
+                        team_name=employee.team.team_name,
+                        project_id=None,
+                        track_id=None,
+                        project_key=None,
+                        project_name=None,
+                        is_active=True,
+                    )
+                )
+            continue
+
+        for assignment in assignments:
             if active_only and not assignment.is_active:
                 continue
             if active_only and assignment.project is not None and not assignment.project.is_active:
                 continue
             assignment.employee = employee
             rows.append(_to_track_response(assignment))
+
     return rows
 
 
@@ -221,9 +249,9 @@ def _to_track_response(assignment: EmployeeTrack) -> EmployeeTrackResponse:
         employee_name=employee.employee_name,
         team_id=team.team_id,
         team_name=team.team_name,
-        project_id=project.project_id,
-        track_id=project.project_id,
-        project_key=project.project_key,
-        project_name=project.project_name,
+        project_id=project.project_id if project else None,
+        track_id=project.project_id if project else None,
+        project_key=project.project_key if project else None,
+        project_name=project.project_name if project else None,
         is_active=assignment.is_active,
     )

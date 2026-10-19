@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, FileText, FolderOpen, Loader2, Presentation } from "lucide-react";
+import { ArrowLeft, ExternalLink, FileText, FolderOpen, Loader2, Presentation } from "lucide-react";
 import { fetchWsrWeeks, wsrTemplateThumbnailUrl, type WsrWeekSummary } from "@/api/wsr";
-import { WSRReportPanel } from "@/components/WSRReportPanel";
+// import { WSRReportPanel } from "@/components/WSRReportPanel"; // MIGHT BE USED IN FUTURE — in-browser deck viewer
 import { VariantRibbon, variantBadgeLabel } from "@/components/wsr/VariantRibbon";
 
-type ViewMode = "list" | "versions" | "deck";
+// "deck" view mode is commented out — WSR decks now open directly in SharePoint.
+// MIGHT BE USED IN FUTURE for in-browser deck viewing.
+// type ViewMode = "list" | "versions" | "deck";
+type ViewMode = "list" | "versions";
 
-const VIEW_PANEL_COUNT = 3;
+// VIEW_PANEL_COUNT was 3 (list + versions + deck). Now only 2 panels are active.
+// MIGHT BE USED IN FUTURE if the deck panel is re-enabled.
+// const VIEW_PANEL_COUNT = 3;
+const VIEW_PANEL_COUNT = 2;
 const VIEW_TRANSITION_MS = 300;
 
 interface WeekGroup {
@@ -145,23 +151,22 @@ export function ViewWSRPage() {
   const [error, setError] = useState("");
   const [view, setView] = useState<ViewMode>("list");
   const [selectedGroup, setSelectedGroup] = useState<WeekGroup | null>(null);
-  const [selectedDeck, setSelectedDeck] = useState<WsrWeekSummary | null>(null);
-  const [displayedDeck, setDisplayedDeck] = useState<WsrWeekSummary | null>(null);
   const [disableTransition, setDisableTransition] = useState(false);
   const prevViewIndexRef = useRef(0);
 
-  const weekGroups = useMemo(() => groupWeeks(weeks), [weeks]);
-  const viewIndex = view === "list" ? 0 : view === "versions" ? 1 : 2;
-  const deckToShow = selectedDeck ?? displayedDeck;
+  // MIGHT BE USED IN FUTURE — selectedDeck / displayedDeck states for in-browser deck panel
+  // const [selectedDeck, setSelectedDeck] = useState<WsrWeekSummary | null>(null);
+  // const [displayedDeck, setDisplayedDeck] = useState<WsrWeekSummary | null>(null);
 
-  useEffect(() => {
-    if (selectedDeck) {
-      setDisplayedDeck(selectedDeck);
-      return;
-    }
-    const timer = window.setTimeout(() => setDisplayedDeck(null), VIEW_TRANSITION_MS);
-    return () => window.clearTimeout(timer);
-  }, [selectedDeck]);
+  const weekGroups = useMemo(() => groupWeeks(weeks), [weeks]);
+  const viewIndex = view === "list" ? 0 : 1;
+
+  // MIGHT BE USED IN FUTURE — displayedDeck fade-out timer for deck panel transition
+  // useEffect(() => {
+  //   if (selectedDeck) { setDisplayedDeck(selectedDeck); return; }
+  //   const timer = window.setTimeout(() => setDisplayedDeck(null), VIEW_TRANSITION_MS);
+  //   return () => window.clearTimeout(timer);
+  // }, [selectedDeck]);
 
   useEffect(() => {
     const jump = Math.abs(viewIndex - prevViewIndexRef.current);
@@ -194,37 +199,44 @@ export function ViewWSRPage() {
     void loadWeeks();
   }, [loadWeeks]);
 
+  /**
+   * Open a deck directly in SharePoint (or download fallback).
+   * If a cloud_web_url is available, opens in a new tab.
+   * MIGHT BE USED IN FUTURE: previously navigated to the in-browser deck panel.
+   */
+  const openDeck = (deck: WsrWeekSummary) => {
+    if (deck.cloud_web_url) {
+      window.open(deck.cloud_web_url, "_blank", "noopener,noreferrer");
+    } else {
+      // Fallback: download the PPT file directly
+      window.open(deck.download_url, "_blank", "noopener,noreferrer");
+    }
+    // MIGHT BE USED IN FUTURE — navigate into in-browser deck panel:
+    // setSelectedDeck(deck);
+    // setView("deck");
+  };
+
   const openWeekGroup = (group: WeekGroup) => {
     setSelectedGroup(group);
     if (group.variants.length === 1) {
-      setSelectedDeck(group.variants[0]);
-      setView("deck");
+      // Single variant: open directly (no versions panel needed)
+      openDeck(group.variants[0]);
       return;
     }
-    setSelectedDeck(null);
+    // Multiple variants: show the versions panel so user can pick
     setView("versions");
   };
 
-  const openDeck = (deck: WsrWeekSummary) => {
-    setSelectedDeck(deck);
-    setView("deck");
-  };
-
   const goBack = () => {
-    if (view === "deck") {
-      if (selectedGroup && selectedGroup.variants.length > 1) {
-        setSelectedDeck(null);
-        setView("versions");
-        return;
-      }
-      setSelectedGroup(null);
-      setSelectedDeck(null);
-      setView("list");
-      return;
-    }
+    // MIGHT BE USED IN FUTURE — "deck" view back logic:
+    // if (view === "deck") {
+    //   if (selectedGroup && selectedGroup.variants.length > 1) {
+    //     setSelectedDeck(null); setView("versions"); return;
+    //   }
+    //   setSelectedGroup(null); setSelectedDeck(null); setView("list"); return;
+    // }
     if (view === "versions") {
       setSelectedGroup(null);
-      setSelectedDeck(null);
       setView("list");
     }
   };
@@ -239,13 +251,13 @@ export function ViewWSRPage() {
             transform: `translateX(-${viewIndex * (100 / VIEW_PANEL_COUNT)}%)`,
           }}
         >
-          {/* Week list */}
-          <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0">
+          {/* ── Panel 1: Week list ── */}
+          <div className="w-1/2 h-full min-h-0 flex flex-col shrink-0">
             <div className="px-6 py-4 bg-white border-b border-gray-200 flex-shrink-0">
               <h2 className="text-base font-semibold text-gray-800">View WSR Reports</h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                Browse previously generated weekly status decks. Weeks with multiple templates appear
-                as folders.
+                Browse previously generated weekly status decks. Click a single-variant week to open
+                it directly in SharePoint. Weeks with multiple templates appear as folders.
               </p>
             </div>
 
@@ -291,6 +303,7 @@ export function ViewWSRPage() {
                     const coverImageUrl = isFolder
                       ? getFolderCoverImageUrl(group)
                       : latestVariant.thumbnail_url;
+                    const hasCloud = !isFolder && !!latestVariant.cloud_web_url;
 
                     return (
                       <button
@@ -299,6 +312,7 @@ export function ViewWSRPage() {
                         onClick={() => openWeekGroup(group)}
                         className="text-left bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-brand-red/30 transition-all group"
                       >
+                        {/* Thumbnail (preserved for all levels) */}
                         <div className="aspect-video bg-gray-100 relative overflow-hidden">
                           {coverImageUrl ? (
                             <img
@@ -325,6 +339,13 @@ export function ViewWSRPage() {
                               {group.variants.length} decks
                             </span>
                           ) : null}
+                          {/* SharePoint badge for single-variant cards with a cloud link */}
+                          {hasCloud ? (
+                            <span className="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-bold text-white rounded bg-blue-600 flex items-center gap-1">
+                              <ExternalLink className="w-3 h-3" />
+                              SharePoint
+                            </span>
+                          ) : null}
                         </div>
 
                         <div className="p-4">
@@ -333,10 +354,22 @@ export function ViewWSRPage() {
                           </p>
                           {isFolder ? (
                             <p className="text-xs text-gray-400 mt-1">
-                              {group.variants.length} WSR decks in this folder
+                              {group.variants.length} WSR decks — click to pick a version
                             </p>
                           ) : (
-                            <VersionMeta week={latestVariant} />
+                            <>
+                              <VersionMeta week={latestVariant} />
+                              {hasCloud ? (
+                                <p className="text-[10px] text-blue-600 font-semibold mt-2 flex items-center gap-1">
+                                  <ExternalLink className="w-3 h-3" />
+                                  Opens in SharePoint
+                                </p>
+                              ) : (
+                                <p className="text-[10px] text-gray-400 mt-2">
+                                  Opens as download (no cloud link yet)
+                                </p>
+                              )}
+                            </>
                           )}
                         </div>
                       </button>
@@ -347,8 +380,8 @@ export function ViewWSRPage() {
             </div>
           </div>
 
-          {/* Versions list for a week folder */}
-          <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0">
+          {/* ── Panel 2: Versions list for a week folder ── */}
+          <div className="w-1/2 h-full min-h-0 flex flex-col shrink-0">
             <div className="px-6 py-4 bg-white border-b border-gray-200 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <button
@@ -369,7 +402,7 @@ export function ViewWSRPage() {
                       : "Week versions"}
                   </h2>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Select a version to open its presentation.
+                    Select a version — it will open directly in SharePoint.
                   </p>
                 </div>
               </div>
@@ -380,6 +413,7 @@ export function ViewWSRPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 max-w-6xl">
                   {selectedGroup.variants.map((week) => {
                     const variant = week.variant ?? 1;
+                    const hasCloud = !!week.cloud_web_url;
                     return (
                       <button
                         key={weekCardKey(week)}
@@ -387,15 +421,34 @@ export function ViewWSRPage() {
                         onClick={() => openDeck(week)}
                         className="text-left bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-brand-red/30 transition-all group"
                       >
-                        <DeckThumbnail
-                          thumbnailUrl={week.thumbnail_url}
-                          variant={variant}
-                        />
+                        {/* Thumbnail preserved at version level */}
+                        <div className="relative">
+                          <DeckThumbnail
+                            thumbnailUrl={week.thumbnail_url}
+                            variant={variant}
+                          />
+                          {hasCloud ? (
+                            <span className="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-bold text-white rounded bg-blue-600 flex items-center gap-1">
+                              <ExternalLink className="w-3 h-3" />
+                              SharePoint
+                            </span>
+                          ) : null}
+                        </div>
                         <div className="p-4">
                           <p className="text-sm font-semibold text-gray-800 group-hover:text-brand-red transition-colors">
                             {formatWeekRange(week.report_start_date, week.report_end_date)}
                           </p>
                           <VersionMeta week={week} />
+                          {hasCloud ? (
+                            <p className="text-[10px] text-blue-600 font-semibold mt-2 flex items-center gap-1">
+                              <ExternalLink className="w-3 h-3" />
+                              Opens in SharePoint
+                            </p>
+                          ) : (
+                            <p className="text-[10px] text-gray-400 mt-2">
+                              Opens as download (no cloud link yet)
+                            </p>
+                          )}
                         </div>
                       </button>
                     );
@@ -410,26 +463,39 @@ export function ViewWSRPage() {
             </div>
           </div>
 
-          {/* Deck viewer */}
-          <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0 overflow-hidden">
-            {deckToShow ? (
-              <WSRReportPanel
-                key={weekCardKey(deckToShow)}
-                startDate={deckToShow.report_start_date}
-                endDate={deckToShow.report_end_date}
-                variant={deckToShow.variant ?? 1}
-                mode="viewer"
-                autoGenerate={false}
-                showRegenerate={false}
-                onBack={goBack}
-              />
-            ) : view === "deck" ? (
-              <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
-                <Loader2 className="w-8 h-8 text-brand-red animate-spin mb-3" />
-                <p className="text-sm">Opening WSR deck…</p>
-              </div>
-            ) : null}
-          </div>
+          {/*
+           * MIGHT BE USED IN FUTURE — Deck viewer panel (in-browser PPT slide viewer)
+           * Previously the 3rd panel that rendered WSRReportPanel in "viewer" mode with
+           * slide thumbnails on the left and the active slide on the right.
+           *
+           * To re-enable:
+           *  1. Restore ViewMode = "list" | "versions" | "deck"
+           *  2. Restore VIEW_PANEL_COUNT = 3 and w-1/3 on panels
+           *  3. Restore selectedDeck / displayedDeck state
+           *  4. Restore openDeck() to set selectedDeck + setView("deck")
+           *  5. Uncomment import { WSRReportPanel } at the top
+           *  6. Uncomment the panel below
+           *
+           * <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0 overflow-hidden">
+           *   {deckToShow ? (
+           *     <WSRReportPanel
+           *       key={weekCardKey(deckToShow)}
+           *       startDate={deckToShow.report_start_date}
+           *       endDate={deckToShow.report_end_date}
+           *       variant={deckToShow.variant ?? 1}
+           *       mode="viewer"
+           *       autoGenerate={false}
+           *       showRegenerate={false}
+           *       onBack={goBack}
+           *     />
+           *   ) : view === "deck" ? (
+           *     <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
+           *       <Loader2 className="w-8 h-8 text-brand-red animate-spin mb-3" />
+           *       <p className="text-sm">Opening WSR deck…</p>
+           *     </div>
+           *   ) : null}
+           * </div>
+           */}
         </div>
       </div>
     </div>

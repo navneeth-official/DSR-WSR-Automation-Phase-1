@@ -1065,11 +1065,13 @@ function DSREntryPage({
   onViewSavedTickets,
   trackCatalog,
   onTracksChanged,
+  isPmo,
 }: {
   onImportComplete: (rows: JiraIssue[], tracks: ImportedTrack[]) => void;
   onViewSavedTickets: () => void;
   trackCatalog: TrackListItem[];
   onTracksChanged: () => void;
+  isPmo: boolean;
 }) {
   const [step, setStep] = useState(1);
   const [jsonText, setJsonText] = useState("");
@@ -1685,7 +1687,7 @@ function DSREntryPage({
         </div>
       )}
         </div>
-        <RovoRequestSidebar trackCatalog={trackCatalog} onTracksChanged={onTracksChanged} />
+        <RovoRequestSidebar trackCatalog={trackCatalog} onTracksChanged={onTracksChanged} isPmo={isPmo} />
       </div>
     </div>
   );
@@ -3585,7 +3587,9 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
 export default function App() {
   // In-memory only — refresh always returns to the login screen
   const [authUser, setAuthUser] = useState<string | null>(null);
+  const [authIsPmo, setAuthIsPmo] = useState(false);
   const [authScreen, setAuthScreen] = useState<"login" | "signup">("login");
+  const [signupSuccessMsg, setSignupSuccessMsg] = useState<string | undefined>(undefined);
   const [page, setPage] = useState<Page>("intake");
   const initialBundle = loadFromStorage();
 
@@ -3615,18 +3619,22 @@ export default function App() {
     void refreshTrackCatalog();
   }, [authUser, refreshTrackCatalog]);
 
-  const handleLoginSuccess = useCallback((username: string) => {
-    setAuthUser(username);
+  const handleLoginSuccess = useCallback((user: { username: string; is_pmo: boolean }) => {
+    setSignupSuccessMsg(undefined);
+    setAuthUser(user.username);
+    setAuthIsPmo(user.is_pmo);
     setAuthScreen("login");
   }, []);
 
   const handleSignupSuccess = useCallback((username: string) => {
-    setAuthUser(username);
+    // Don't auto-login — redirect to login page so the user authenticates via the API.
+    setSignupSuccessMsg(`Account created for "${username}". Please sign in.`);
     setAuthScreen("login");
   }, []);
 
   const handleLogout = useCallback(() => {
     setAuthUser(null);
+    setAuthIsPmo(false);
     setAuthScreen("login");
     setPage("intake");
   }, []);
@@ -3673,7 +3681,11 @@ export default function App() {
     return (
       <LoginPage
         onSuccess={handleLoginSuccess}
-        onNavigateToSignup={() => setAuthScreen("signup")}
+        onNavigateToSignup={() => {
+          setSignupSuccessMsg(undefined);
+          setAuthScreen("signup");
+        }}
+        successMessage={signupSuccessMsg}
       />
     );
   }
@@ -3697,6 +3709,7 @@ export default function App() {
           void refreshTrackCatalog();
         }}
         authUser={authUser}
+        isPmo={authIsPmo}
         onLogout={handleLogout}
       />
 
@@ -3708,6 +3721,7 @@ export default function App() {
             onViewSavedTickets={() => setPage("complete-stories")}
             trackCatalog={trackCatalog}
             onTracksChanged={() => { void refreshTrackCatalog(); }}
+            isPmo={authIsPmo}
           />
         ) : page === "complete-stories" ? (
           <SavedTicketsPage tracks={savedTracks} trackCatalog={trackCatalog} />

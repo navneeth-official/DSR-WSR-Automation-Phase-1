@@ -2,7 +2,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class EmployeeTrackResponse(BaseModel):
-    """One employee-to-track assignment row."""
+    """One employee-to-track assignment row.
+
+    Track fields (project_id, track_id, project_key, project_name) are null
+    for employees who signed up but have not yet been assigned to any track.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -10,11 +14,17 @@ class EmployeeTrackResponse(BaseModel):
     employee_name: str
     team_id: int
     team_name: str
-    project_id: int = Field(description="Track project_id in the projects table")
-    track_id: int = Field(description="Alias for project_id; tracks are stored as projects")
-    project_key: str
-    project_name: str
-    is_active: bool
+    project_id: int | None = Field(
+        default=None,
+        description="Track project_id; null when employee has no track assignment yet",
+    )
+    track_id: int | None = Field(
+        default=None,
+        description="Alias for project_id; null when unassigned",
+    )
+    project_key: str | None = None
+    project_name: str | None = None
+    is_active: bool = True
 
 
 class EmployeeTrackListResponse(BaseModel):

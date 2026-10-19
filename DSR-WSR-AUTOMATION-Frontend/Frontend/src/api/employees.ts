@@ -3,10 +3,11 @@ export interface EmployeeTrackItem {
   employee_name: string;
   team_id: number;
   team_name: string;
-  project_id: number;
-  track_id: number;
-  project_key: string;
-  project_name: string;
+  /** Null when the employee signed up but has not yet been assigned to any track. */
+  project_id: number | null;
+  track_id: number | null;
+  project_key: string | null;
+  project_name: string | null;
   is_active: boolean;
 }
 

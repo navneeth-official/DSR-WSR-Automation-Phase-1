@@ -27,11 +27,19 @@ class UserRepository:
         stmt = select(Team).order_by(Team.team_name)
         return list(self.db.scalars(stmt).all())
 
-    def create_user(self, *, username: str, password_hash: str, team_id: int) -> User:
+    def create_user(
+        self,
+        *,
+        username: str,
+        password_hash: str,
+        team_id: int,
+        is_pmo: bool = False,
+    ) -> User:
         user = User(
             username=username,
             password_hash=password_hash,
             team_id=team_id,
+            is_pmo=is_pmo,
         )
         self.db.add(user)
         self.db.commit()

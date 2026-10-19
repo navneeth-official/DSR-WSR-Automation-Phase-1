@@ -1,28 +1,35 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { AlertCircle, Building2, Lock, User } from "lucide-react";
 import g10xLogo from "@/assets/g10x-logo.png";
-import { registerUser } from "@/auth/users";
+import { fetchSignupTeams, signupUser, type TeamOption } from "@/api/auth";
 
 interface SignupPageProps {
   onSuccess: (username: string) => void;
   onNavigateToLogin?: () => void;
 }
 
-const DUMMY_DEPARTMENTS = [
-  { id: "digital-commerce", name: "Digital Commerce & Omnichannel" },
-  { id: "supply-chain", name: "Supply Chain Automation" },
-  { id: "core-engineering", name: "Core Engineering & Platforms" },
-  { id: "data-analytics", name: "Data Engineering & Analytics" },
-  { id: "qa-testing", name: "QA & Automation Delivery" },
-];
-
 export function SignupPage({ onSuccess, onNavigateToLogin }: SignupPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [department, setDepartment] = useState("");
+  const [teams, setTeams] = useState<TeamOption[]>([]);
+  const [teamsLoading, setTeamsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetchSignupTeams()
+      .then((res) => {
+        setTeams(res.teams);
+      })
+      .catch(() => {
+        // fallback: leave teams empty; user will see "No departments available"
+      })
+      .finally(() => {
+        setTeamsLoading(false);
+      });
+  }, []);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -45,21 +52,18 @@ export function SignupPage({ onSuccess, onNavigateToLogin }: SignupPageProps) {
 
     setSubmitting(true);
 
-    window.setTimeout(() => {
-      const result = registerUser({
-        username: username.trim(),
-        password,
-        department,
-      });
-
-      if (result.ok === false) {
-        setError(result.error);
+    signupUser({
+      username: username.trim(),
+      password,
+      team_name: department,
+    })
+      .then(() => {
+        onSuccess(username.trim());
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Sign-up failed. Please try again.");
         setSubmitting(false);
-        return;
-      }
-
-      onSuccess(username.trim());
-    }, 200);
+      });
   };
 
   return (
@@ -133,22 +137,27 @@ export function SignupPage({ onSuccess, onNavigateToLogin }: SignupPageProps) {
                   <select
                     id="signup-department"
                     value={department}
+                    disabled={teamsLoading}
                     onChange={(e) => {
                       setDepartment(e.target.value);
                       setError(null);
                     }}
-                    className="w-full appearance-none rounded-lg border border-white/10 bg-black/20 py-2.5 pl-10 pr-8 text-sm text-white outline-none transition-all focus:border-brand-orange focus:bg-black/40 focus:ring-1 focus:ring-brand-orange"
+                    className="w-full appearance-none rounded-lg border border-white/10 bg-black/20 py-2.5 pl-10 pr-8 text-sm text-white outline-none transition-all focus:border-brand-orange focus:bg-black/40 focus:ring-1 focus:ring-brand-orange disabled:opacity-50"
                   >
                     <option value="" disabled className="bg-zinc-900 text-gray-500">
-                      Select your department
+                      {teamsLoading
+                        ? "Loading departments…"
+                        : teams.length === 0
+                          ? "No departments available"
+                          : "Select your department"}
                     </option>
-                    {DUMMY_DEPARTMENTS.map((dept) => (
+                    {teams.map((team) => (
                       <option
-                        key={dept.id}
-                        value={dept.id}
+                        key={team.team_id}
+                        value={team.team_name}
                         className="bg-zinc-900 text-white"
                       >
-                        {dept.name}
+                        {team.team_name}
                       </option>
                     ))}
                   </select>

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +22,11 @@ class User(Base):
         ForeignKey("teams.team_id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+    )
+    is_pmo: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=func.false(),
+        nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(
