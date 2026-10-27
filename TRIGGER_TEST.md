@@ -2,7 +2,7 @@
 
 Use this file to verify **GitHub push → GitHub Action → GitLab pipeline → VM deploy**.
 
-## How to test
+## How to test this
 
 1. Edit the line below (change the timestamp or add a word).
 2. Commit and push to **`master`** or **`main`** on GitHub.
