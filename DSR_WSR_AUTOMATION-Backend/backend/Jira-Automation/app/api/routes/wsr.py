@@ -1,5 +1,8 @@
+import json
+import re
 from datetime import date
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
@@ -24,13 +27,23 @@ from app.schemas.wsr import (
     WsrWeekListResponse,
     WsrWeekSummary,
 )
-from app.paths import wsr_output_paths
+from app.paths import (
+    OUTPUT_DIR,
+    wsr_output_paths,
+    wsr_validation_dir,
+    wsr_validation_report_path,
+)
+from app.services.validation_upload_service import (
+    restore_validation_image,
+    restore_validation_report,
+)
+from app.services.wsr_validation_service import get_validation_status
 from app.services.pptx_editor_service import (
     export_editor_document_to_pptx,
     load_wsr_editor_deck,
     save_wsr_editor_deck,
 )
-from app.services.wsr_job_service import get_job, start_wsr_job
+from app.services.wsr_job_service import get_job, start_validation_job, start_wsr_job
 from app.services.wsr_preview_service import (
     export_wsr_slide_previews,
     resolve_preview_image_path,
@@ -292,6 +305,163 @@ def download_wsr_deck(
         ),
         filename=ppt_path.name,
     )
+
+
+# ── Deck validation / slide review ───────────────────────────────────────────
+
+_ANNOTATION_NAME_RE = re.compile(r"^slide_(\d+)_([a-z0-9._-]+)\.png$")
+_PATH_KEYS = ("source_file", "template_file", "content_file")
+
+
+def _read_validation_report(start_date: date, end_date: date, variant: int) -> dict | None:
+    """Per-deck report first, then the legacy global ``output/validation_report.json``."""
+    report_path = wsr_validation_report_path(start_date, end_date, variant=variant)
+    if not report_path.is_file():
+        status = get_validation_status(start_date, end_date, variant=variant)["status"]
+        if status in ("pending", "error"):
+            return None
+        if not restore_validation_report(start_date, end_date, variant=variant):
+            report_path = OUTPUT_DIR / "validation_report.json"
+    if not report_path.is_file():
+        return None
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _public_report(report: dict) -> dict:
+    """Strip server file-system paths before sending a report to the browser."""
+    cleaned = dict(report)
+    for key in _PATH_KEYS:
+        if cleaned.get(key):
+            cleaned[key] = Path(str(cleaned[key]).replace("\\", "/")).name
+    findings = []
+    for finding in cleaned.get("findings") or []:
+        item = dict(finding)
+        if item.get("image"):
+            item["image"] = Path(str(item["image"]).replace("\\", "/")).name
+        findings.append(item)
+    cleaned["findings"] = findings
+    return cleaned
+
+
+def _annotation_image_url(start_date: date, end_date: date, variant: int, filename: str) -> str:
+    return (
+        f"/api/wsr/annotation-image?start_date={start_date.isoformat()}"
+        f"&end_date={end_date.isoformat()}&variant={variant}&filename={quote(filename)}"
+    )
+
+
+@router.get("/validation-report")
+def get_wsr_validation_report(
+    start_date: date = Query(..., description="WSR week start (Monday)"),
+    end_date: date = Query(..., description="WSR week end (Friday)"),
+    variant: int = Query(1, ge=1, description="WSR deck variant (1=primary, 2=V2, …)"),
+) -> dict:
+    """Validation report (findings + per-slide summaries). 404 until validation finishes."""
+    report = _read_validation_report(start_date, end_date, variant)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Validation report not available yet.")
+    return _public_report(report)
+
+
+@router.get("/validation-status")
+def get_wsr_validation_status(
+    start_date: date = Query(..., description="WSR week start (Monday)"),
+    end_date: date = Query(..., description="WSR week end (Friday)"),
+    variant: int = Query(1, ge=1, description="WSR deck variant (1=primary, 2=V2, …)"),
+) -> dict:
+    """``status``: ready | pending | error | not_started (validation never ran for this deck)."""
+    status = get_validation_status(start_date, end_date, variant=variant)
+    if status["status"] == "not_started" and restore_validation_report(
+        start_date, end_date, variant=variant
+    ):
+        status = get_validation_status(start_date, end_date, variant=variant)
+    return status
+
+
+@router.post("/validation/run", status_code=202)
+def run_wsr_validation_route(
+    start_date: date = Query(..., description="WSR week start (Monday)"),
+    end_date: date = Query(..., description="WSR week end (Friday)"),
+    variant: int = Query(1, ge=1, description="WSR deck variant (1=primary, 2=V2, …)"),
+) -> dict:
+    """(Re)run validation for an existing deck in the background."""
+    if not resolve_wsr_ppt_path(start_date, end_date, variant=variant).is_file():
+        raise HTTPException(status_code=404, detail="No deck found for this week.")
+    return start_validation_job(start_date=start_date, end_date=end_date, variant=variant)
+
+
+@router.get("/annotations")
+def list_wsr_annotations(
+    start_date: date = Query(..., description="WSR week start (Monday)"),
+    end_date: date = Query(..., description="WSR week end (Friday)"),
+    variant: int = Query(1, ge=1, description="WSR deck variant (1=primary, 2=V2, …)"),
+) -> list[dict]:
+    """Annotated slide images for a deck (``slide_{index}_{rule-id}.png``), with slide numbers."""
+    directory = wsr_validation_dir(start_date, end_date, variant=variant)
+    if not directory.is_dir():
+        return []
+
+    report = _read_validation_report(start_date, end_date, variant) or {}
+    number_by_index = {
+        int(s["slide_index"]): int(s["slide_number"])
+        for s in report.get("slide_summaries") or []
+        if s.get("slide_index") is not None and s.get("slide_number") is not None
+    }
+    finding_by_key = {
+        (int(f["slide_index"]), str(f.get("rule_id") or "").lower()): f
+        for f in report.get("findings") or []
+        if f.get("slide_index") is not None
+    }
+
+    items: list[dict] = []
+    for path in directory.iterdir():
+        match = _ANNOTATION_NAME_RE.match(path.name)
+        if not match or not path.is_file():
+            continue
+        slide_index = int(match.group(1))
+        slug = match.group(2)
+        finding = finding_by_key.get((slide_index, slug), {})
+        items.append(
+            {
+                "filename": path.name,
+                "slide_index": slide_index,
+                "slide_number": number_by_index.get(slide_index, slide_index),
+                "rule_id": slug.upper(),
+                "severity": finding.get("severity"),
+                "label": finding.get("annotation_label") or finding.get("issue"),
+                "image_url": _annotation_image_url(start_date, end_date, variant, path.name),
+            }
+        )
+    items.sort(key=lambda item: (item["slide_number"], item["rule_id"]))
+    return items
+
+
+@router.get("/annotation-image")
+def get_wsr_annotation_image(
+    start_date: date = Query(..., description="WSR week start (Monday)"),
+    end_date: date = Query(..., description="WSR week end (Friday)"),
+    filename: str = Query(..., description="Annotated PNG name, e.g. slide_3_hl-waste-01.png"),
+    variant: int = Query(1, ge=1, description="WSR deck variant (1=primary, 2=V2, …)"),
+) -> FileResponse:
+    """Serve one annotated PNG (local first, SharePoint copy as fallback)."""
+    if not _ANNOTATION_NAME_RE.match(filename):
+        raise HTTPException(status_code=400, detail="Invalid annotation filename.")
+
+    directory = wsr_validation_dir(start_date, end_date, variant=variant).resolve()
+    image_path = (directory / filename).resolve()
+    if image_path.parent != directory:
+        raise HTTPException(status_code=400, detail="Invalid annotation filename.")
+
+    if not image_path.is_file():
+        restored = restore_validation_image(start_date, end_date, filename, variant=variant)
+        if restored is None or not restored.is_file():
+            raise HTTPException(status_code=404, detail="Annotation image not found.")
+        image_path = restored.resolve()
+    return FileResponse(path=image_path, media_type="image/png")
 
 
 @router.get("/editor/deck")

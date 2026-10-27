@@ -405,3 +405,141 @@ export async function uploadWsrTemplate(file: File): Promise<WsrTemplateUploadRe
   if (!res.ok) throw new Error(await parseError(res));
   return res.json() as Promise<WsrTemplateUploadResponse>;
 }
+
+/* ── Deck validation / slide review ─────────────────────────────────────── */
+
+export type WsrFindingSeverity = "fail" | "warn";
+
+export interface WsrValidationFinding {
+  slide_index: number;
+  slide_number: number;
+  slide_title?: string;
+  service?: string;
+  area?: string;
+  rule_id: string;
+  severity: WsrFindingSeverity;
+  issue: string;
+  where?: string;
+  fix_steps?: string[];
+  why?: string;
+  annotation_label?: string;
+  /** Annotated PNG file name (no server path). */
+  image?: string | null;
+}
+
+export interface WsrValidationSlideSummary {
+  slide_index: number;
+  slide_number: number;
+  slide_title: string;
+  pass: boolean;
+  fail_count: number;
+  warn_count: number;
+  finding_count?: number;
+  checks_run?: string[];
+}
+
+export interface WsrValidationReport {
+  report_version: string;
+  deck_pass: boolean;
+  executive_summary: string;
+  summary: {
+    total_findings: number;
+    fail: number;
+    warn: number;
+    slides_to_fix: number[];
+    checks_run: string[];
+  };
+  slide_summaries?: WsrValidationSlideSummary[];
+  findings: WsrValidationFinding[];
+}
+
+export interface WsrAnnotationItem {
+  filename: string;
+  slide_index: number;
+  slide_number: number;
+  rule_id: string;
+  severity?: WsrFindingSeverity | null;
+  label?: string | null;
+  image_url: string;
+}
+
+export interface WsrValidationStatus {
+  status: "ready" | "pending" | "error" | "not_started";
+  has_annotations: boolean;
+  message?: string | null;
+}
+
+/** Returns null while the report does not exist yet (404). */
+export async function fetchWsrValidationReport(
+  startDate: string,
+  endDate: string,
+  variant = 1,
+): Promise<WsrValidationReport | null> {
+  const res = await fetch(
+    `/api/wsr/validation-report?${weekParams(startDate, endDate, variant).toString()}`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json() as Promise<WsrValidationReport>;
+}
+
+export async function fetchWsrAnnotations(
+  startDate: string,
+  endDate: string,
+  variant = 1,
+): Promise<WsrAnnotationItem[]> {
+  const res = await fetch(
+    `/api/wsr/annotations?${weekParams(startDate, endDate, variant).toString()}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json() as Promise<WsrAnnotationItem[]>;
+}
+
+export async function fetchWsrValidationStatus(
+  startDate: string,
+  endDate: string,
+  variant = 1,
+): Promise<WsrValidationStatus> {
+  const res = await fetch(
+    `/api/wsr/validation-status?${weekParams(startDate, endDate, variant).toString()}`,
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json() as Promise<WsrValidationStatus>;
+}
+
+/** Start (or restart) validation for an existing deck. */
+export async function runWsrValidation(
+  startDate: string,
+  endDate: string,
+  variant = 1,
+): Promise<WsrValidationStatus> {
+  const res = await fetch(
+    `/api/wsr/validation/run?${weekParams(startDate, endDate, variant).toString()}`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json() as Promise<WsrValidationStatus>;
+}
+
+export function wsrAnnotationImageUrl(
+  startDate: string,
+  endDate: string,
+  filename: string,
+  variant = 1,
+): string {
+  const params = weekParams(startDate, endDate, variant);
+  params.set("filename", filename);
+  return `/api/wsr/annotation-image?${params.toString()}`;
+}
+
+/** Rendered PNG of a plain slide (`slideNumber` is 1-based). */
+export function wsrPreviewImageUrl(
+  startDate: string,
+  endDate: string,
+  slideNumber: number,
+  variant = 1,
+): string {
+  const params = weekParams(startDate, endDate, variant);
+  params.set("slide_index", String(slideNumber));
+  return `/api/wsr/preview/image?${params.toString()}`;
+}

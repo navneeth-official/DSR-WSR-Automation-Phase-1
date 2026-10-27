@@ -250,7 +250,9 @@ def enrich_finding(violation: dict[str, Any], *, severity: str) -> dict[str, Any
 
     return {
         "slide_index": slide_index,
-        "slide_number": (slide_index + 1) if slide_index is not None else None,
+        # extract_deck() numbers slides from 1 (same as PowerPoint and the renderers),
+        # so slide_index already is the number the user sees.
+        "slide_number": slide_index,
         "slide_title": title,
         "service": _service_label(title),
         "area": area,

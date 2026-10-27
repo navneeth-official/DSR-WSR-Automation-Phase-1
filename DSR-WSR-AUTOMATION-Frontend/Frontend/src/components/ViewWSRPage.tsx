@@ -1,18 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ExternalLink, FileText, FolderOpen, Loader2, Presentation } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  Loader2,
+  Presentation,
+} from "lucide-react";
 import { fetchWsrWeeks, wsrTemplateThumbnailUrl, type WsrWeekSummary } from "@/api/wsr";
-// import { WSRReportPanel } from "@/components/WSRReportPanel"; // MIGHT BE USED IN FUTURE — in-browser deck viewer
+import { SlideReviewButton, WsrSlidePanel } from "@/components/WsrSlidePanel";
 import { VariantRibbon, variantBadgeLabel } from "@/components/wsr/VariantRibbon";
+import { useWsrValidation } from "@/components/wsr/useWsrValidation";
 
-// "deck" view mode is commented out — WSR decks now open directly in SharePoint.
-// MIGHT BE USED IN FUTURE for in-browser deck viewing.
-// type ViewMode = "list" | "versions" | "deck";
-type ViewMode = "list" | "versions";
+// list (weeks) → versions (week folder) → deck (details + slide review)
+type ViewMode = "list" | "versions" | "deck";
 
-// VIEW_PANEL_COUNT was 3 (list + versions + deck). Now only 2 panels are active.
-// MIGHT BE USED IN FUTURE if the deck panel is re-enabled.
-// const VIEW_PANEL_COUNT = 3;
-const VIEW_PANEL_COUNT = 2;
+const VIEW_PANEL_COUNT = 3;
 const VIEW_TRANSITION_MS = 300;
 
 interface WeekGroup {
@@ -154,19 +158,29 @@ export function ViewWSRPage() {
   const [disableTransition, setDisableTransition] = useState(false);
   const prevViewIndexRef = useRef(0);
 
-  // MIGHT BE USED IN FUTURE — selectedDeck / displayedDeck states for in-browser deck panel
-  // const [selectedDeck, setSelectedDeck] = useState<WsrWeekSummary | null>(null);
-  // const [displayedDeck, setDisplayedDeck] = useState<WsrWeekSummary | null>(null);
+  const [selectedDeck, setSelectedDeck] = useState<WsrWeekSummary | null>(null);
+  // Kept for the slide-out transition so the panel does not go blank while closing.
+  const [displayedDeck, setDisplayedDeck] = useState<WsrWeekSummary | null>(null);
+  const [slideReviewOpen, setSlideReviewOpen] = useState(false);
 
   const weekGroups = useMemo(() => groupWeeks(weeks), [weeks]);
-  const viewIndex = view === "list" ? 0 : 1;
+  const viewIndex = view === "list" ? 0 : view === "versions" ? 1 : 2;
 
-  // MIGHT BE USED IN FUTURE — displayedDeck fade-out timer for deck panel transition
-  // useEffect(() => {
-  //   if (selectedDeck) { setDisplayedDeck(selectedDeck); return; }
-  //   const timer = window.setTimeout(() => setDisplayedDeck(null), VIEW_TRANSITION_MS);
-  //   return () => window.clearTimeout(timer);
-  // }, [selectedDeck]);
+  useEffect(() => {
+    if (selectedDeck) {
+      setDisplayedDeck(selectedDeck);
+      return;
+    }
+    const timer = window.setTimeout(() => setDisplayedDeck(null), VIEW_TRANSITION_MS);
+    return () => window.clearTimeout(timer);
+  }, [selectedDeck]);
+
+  const validation = useWsrValidation(
+    displayedDeck?.report_start_date ?? "",
+    displayedDeck?.report_end_date ?? "",
+    displayedDeck?.variant ?? 1,
+    displayedDeck != null,
+  );
 
   useEffect(() => {
     const jump = Math.abs(viewIndex - prevViewIndexRef.current);
@@ -199,21 +213,11 @@ export function ViewWSRPage() {
     void loadWeeks();
   }, [loadWeeks]);
 
-  /**
-   * Open a deck directly in SharePoint (or download fallback).
-   * If a cloud_web_url is available, opens in a new tab.
-   * MIGHT BE USED IN FUTURE: previously navigated to the in-browser deck panel.
-   */
+  /** Open the deck detail panel (SharePoint / download links + Slide Review). */
   const openDeck = (deck: WsrWeekSummary) => {
-    if (deck.cloud_web_url) {
-      window.open(deck.cloud_web_url, "_blank", "noopener,noreferrer");
-    } else {
-      // Fallback: download the PPT file directly
-      window.open(deck.download_url, "_blank", "noopener,noreferrer");
-    }
-    // MIGHT BE USED IN FUTURE — navigate into in-browser deck panel:
-    // setSelectedDeck(deck);
-    // setView("deck");
+    setSelectedDeck(deck);
+    setSlideReviewOpen(false);
+    setView("deck");
   };
 
   const openWeekGroup = (group: WeekGroup) => {
@@ -228,13 +232,17 @@ export function ViewWSRPage() {
   };
 
   const goBack = () => {
-    // MIGHT BE USED IN FUTURE — "deck" view back logic:
-    // if (view === "deck") {
-    //   if (selectedGroup && selectedGroup.variants.length > 1) {
-    //     setSelectedDeck(null); setView("versions"); return;
-    //   }
-    //   setSelectedGroup(null); setSelectedDeck(null); setView("list"); return;
-    // }
+    if (view === "deck") {
+      setSlideReviewOpen(false);
+      setSelectedDeck(null);
+      if (selectedGroup && selectedGroup.variants.length > 1) {
+        setView("versions");
+        return;
+      }
+      setSelectedGroup(null);
+      setView("list");
+      return;
+    }
     if (view === "versions") {
       setSelectedGroup(null);
       setView("list");
@@ -252,12 +260,13 @@ export function ViewWSRPage() {
           }}
         >
           {/* ── Panel 1: Week list ── */}
-          <div className="w-1/2 h-full min-h-0 flex flex-col shrink-0">
+          <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0">
             <div className="px-6 py-4 bg-white border-b border-gray-200 flex-shrink-0">
               <h2 className="text-base font-semibold text-gray-800">View WSR Reports</h2>
               <p className="text-xs text-gray-400 mt-0.5">
-                Browse previously generated weekly status decks. Click a single-variant week to open
-                it directly in SharePoint. Weeks with multiple templates appear as folders.
+                Browse previously generated weekly status decks. Click a week to open the deck, its
+                SharePoint link and the slide review. Weeks with multiple templates appear as
+                folders.
               </p>
             </div>
 
@@ -362,11 +371,11 @@ export function ViewWSRPage() {
                               {hasCloud ? (
                                 <p className="text-[10px] text-blue-600 font-semibold mt-2 flex items-center gap-1">
                                   <ExternalLink className="w-3 h-3" />
-                                  Opens in SharePoint
+                                  SharePoint link available
                                 </p>
                               ) : (
                                 <p className="text-[10px] text-gray-400 mt-2">
-                                  Opens as download (no cloud link yet)
+                                  No SharePoint link yet — download available
                                 </p>
                               )}
                             </>
@@ -381,7 +390,7 @@ export function ViewWSRPage() {
           </div>
 
           {/* ── Panel 2: Versions list for a week folder ── */}
-          <div className="w-1/2 h-full min-h-0 flex flex-col shrink-0">
+          <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0">
             <div className="px-6 py-4 bg-white border-b border-gray-200 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <button
@@ -402,7 +411,7 @@ export function ViewWSRPage() {
                       : "Week versions"}
                   </h2>
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Select a version — it will open directly in SharePoint.
+                    Select a version to open it and review its slides.
                   </p>
                 </div>
               </div>
@@ -442,11 +451,11 @@ export function ViewWSRPage() {
                           {hasCloud ? (
                             <p className="text-[10px] text-blue-600 font-semibold mt-2 flex items-center gap-1">
                               <ExternalLink className="w-3 h-3" />
-                              Opens in SharePoint
+                              SharePoint link available
                             </p>
                           ) : (
                             <p className="text-[10px] text-gray-400 mt-2">
-                              Opens as download (no cloud link yet)
+                              No SharePoint link yet — download available
                             </p>
                           )}
                         </div>
@@ -463,39 +472,136 @@ export function ViewWSRPage() {
             </div>
           </div>
 
-          {/*
-           * MIGHT BE USED IN FUTURE — Deck viewer panel (in-browser PPT slide viewer)
-           * Previously the 3rd panel that rendered WSRReportPanel in "viewer" mode with
-           * slide thumbnails on the left and the active slide on the right.
-           *
-           * To re-enable:
-           *  1. Restore ViewMode = "list" | "versions" | "deck"
-           *  2. Restore VIEW_PANEL_COUNT = 3 and w-1/3 on panels
-           *  3. Restore selectedDeck / displayedDeck state
-           *  4. Restore openDeck() to set selectedDeck + setView("deck")
-           *  5. Uncomment import { WSRReportPanel } at the top
-           *  6. Uncomment the panel below
-           *
-           * <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0 overflow-hidden">
-           *   {deckToShow ? (
-           *     <WSRReportPanel
-           *       key={weekCardKey(deckToShow)}
-           *       startDate={deckToShow.report_start_date}
-           *       endDate={deckToShow.report_end_date}
-           *       variant={deckToShow.variant ?? 1}
-           *       mode="viewer"
-           *       autoGenerate={false}
-           *       showRegenerate={false}
-           *       onBack={goBack}
-           *     />
-           *   ) : view === "deck" ? (
-           *     <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
-           *       <Loader2 className="w-8 h-8 text-brand-red animate-spin mb-3" />
-           *       <p className="text-sm">Opening WSR deck…</p>
-           *     </div>
-           *   ) : null}
-           * </div>
-           */}
+          {/* ── Panel 3: Deck details + Slide Review ── */}
+          <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0 overflow-hidden">
+            {displayedDeck ? (
+              <>
+                <div className="px-6 py-4 bg-white border-b border-gray-200 flex-shrink-0">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <button
+                        type="button"
+                        onClick={goBack}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 flex-shrink-0"
+                      >
+                        <ArrowLeft className="w-3.5 h-3.5" />
+                        Back
+                      </button>
+                      <div className="min-w-0">
+                        <h2 className="text-base font-semibold text-gray-800 truncate">
+                          {formatWeekRange(
+                            displayedDeck.report_start_date,
+                            displayedDeck.report_end_date,
+                          )}
+                        </h2>
+                        <p
+                          className="text-xs text-gray-400 mt-0.5 truncate"
+                          title={displayedDeck.filename}
+                        >
+                          {displayedDeck.filename}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {displayedDeck.cloud_web_url ? (
+                        <a
+                          href={displayedDeck.cloud_web_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-50"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          SharePoint
+                        </a>
+                      ) : null}
+                      <a
+                        href={displayedDeck.download_url}
+                        download={displayedDeck.filename}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-brand-orange rounded-lg hover:bg-brand-orange-hover"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <WsrSlidePanel
+                    key={weekCardKey(displayedDeck)}
+                    startDate={displayedDeck.report_start_date}
+                    endDate={displayedDeck.report_end_date}
+                    variant={displayedDeck.variant ?? 1}
+                    validation={validation}
+                    open={slideReviewOpen}
+                    onOpenChange={setSlideReviewOpen}
+                    defaultContent={
+                      <div className="flex-1 min-h-0 overflow-auto p-6">
+                        <div className="max-w-md mx-auto text-center">
+                          <div className="aspect-video bg-gray-100 rounded-xl overflow-hidden border border-gray-200 shadow-sm">
+                            {displayedDeck.thumbnail_url ? (
+                              <img
+                                src={displayedDeck.thumbnail_url}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 gap-2">
+                                <FileText className="w-8 h-8" />
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-base font-semibold text-gray-800 mt-4">WSR Deck</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {formatWeekRange(
+                              displayedDeck.report_start_date,
+                              displayedDeck.report_end_date,
+                            )}
+                          </p>
+                          <div className="flex flex-wrap items-center justify-center gap-2 mt-5">
+                            {displayedDeck.cloud_web_url ? (
+                              <a
+                                href={displayedDeck.cloud_web_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                                Open in SharePoint
+                              </a>
+                            ) : null}
+                            <a
+                              href={displayedDeck.download_url}
+                              download={displayedDeck.filename}
+                              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-brand-orange rounded-lg hover:bg-brand-orange-hover shadow"
+                            >
+                              <Download className="w-4 h-4" />
+                              Download PPT
+                            </a>
+                            <SlideReviewButton
+                              onClick={() => setSlideReviewOpen(true)}
+                              findingCount={validation.findingCount}
+                              className="py-2 text-sm"
+                            />
+                          </div>
+                          {!displayedDeck.cloud_web_url ? (
+                            <p className="mt-3 text-[11px] text-gray-400">
+                              No SharePoint link yet — use Download PPT.
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    }
+                  />
+                </div>
+              </>
+            ) : view === "deck" ? (
+              <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
+                <Loader2 className="w-8 h-8 text-brand-red animate-spin mb-3" />
+                <p className="text-sm">Opening WSR deck…</p>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

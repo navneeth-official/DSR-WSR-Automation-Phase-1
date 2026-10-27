@@ -64,6 +64,42 @@ def wsr_preview_dir(start_date: date, end_date: date, *, variant: int = 1) -> Pa
     return OUTPUT_DIR / f"{stem}_slides"
 
 
+def wsr_stem(start_date: date, end_date: date, *, variant: int = 1) -> str:
+    return (
+        f"WSR_{start_date.isoformat()}_{end_date.isoformat()}"
+        f"{wsr_variant_suffix(variant)}"
+    )
+
+
+def wsr_validation_dir(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """Directory holding annotated slide PNGs produced by deck validation."""
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation"
+
+
+def wsr_validation_report_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """Per-deck validation report JSON."""
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation_report.json"
+
+
+def wsr_validation_report_md_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation_report.md"
+
+
+def wsr_validation_error_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """Written when validation fails (e.g. locked PPT); generation itself is unaffected."""
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation_error.json"
+
+
+def wsr_validation_status_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """Tiny state file (running / ready / error) polled by the validation-status endpoint."""
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation_status.json"
+
+
+def wsr_validation_meta_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """SharePoint/OneDrive upload metadata for validation artefacts."""
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation_meta.json"
+
+
 def wsr_manifest_path(start_date: date, end_date: date) -> Path:
     """JSON manifest listing all generated variants for a report week."""
     stem = f"WSR_{start_date.isoformat()}_{end_date.isoformat()}"

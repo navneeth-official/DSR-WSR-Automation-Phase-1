@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -10,6 +11,13 @@ from typing import Any, Literal
 
 from app.database import SessionLocal
 from app.services.wsr_service import generate_wsr_deck
+from app.services.wsr_validation_service import (
+    begin_validation,
+    get_validation_status,
+    run_wsr_validation,
+)
+
+logger = logging.getLogger(__name__)
 
 JobStatus = Literal["queued", "running", "completed", "failed"]
 
@@ -72,6 +80,8 @@ def start_wsr_job(
             job.result = None
 
         db = SessionLocal()
+        variant = 1
+        generated = False
         try:
             result = generate_wsr_deck(
                 db,
@@ -79,10 +89,18 @@ def start_wsr_job(
                 end_date=end_date,
                 template_id=job.template_id,
             )
+            variant = int(result.get("variant") or 1)
+            # Mark validation pending *before* the job reads "completed" so the UI
+            # never sees a stale or missing report in between.
+            try:
+                begin_validation(start_date, end_date, variant=variant)
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not mark validation as pending")
             with _lock:
                 job.status = "completed"
                 job.result = result
                 job.finished_at = time.time()
+            generated = True
         except Exception as exc:
             with _lock:
                 job.status = "failed"
@@ -91,5 +109,35 @@ def start_wsr_job(
         finally:
             db.close()
 
+        if generated:
+            # Validation never changes the job status; failures are recorded on disk.
+            run_wsr_validation(
+                start_date,
+                end_date,
+                variant=variant,
+                template_id=job.template_id,
+            )
+
     threading.Thread(target=_run, name=f"wsr-{job_id}", daemon=True).start()
     return job
+
+
+def start_validation_job(
+    *,
+    start_date: date,
+    end_date: date,
+    variant: int = 1,
+) -> dict[str, Any]:
+    """Run validation on an already generated deck (background). Returns current status."""
+    with _lock:
+        status = get_validation_status(start_date, end_date, variant=variant)
+        if status["status"] == "pending":
+            return status
+        begin_validation(start_date, end_date, variant=variant)
+
+    def _run() -> None:
+        run_wsr_validation(start_date, end_date, variant=variant)
+
+    name = f"wsr-validate-{start_date}_{end_date}_v{variant}"
+    threading.Thread(target=_run, name=name, daemon=True).start()
+    return get_validation_status(start_date, end_date, variant=variant)

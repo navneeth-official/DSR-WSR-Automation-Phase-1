@@ -145,6 +145,26 @@ def annotate_finding_image(
         color = (37, 99, 235)
         label = "HL–KA gap"
 
+    elif rule_id in {"KA-SIZE-01", "CONT-KA-01"} and ka:
+        # Highlight the unused area below the Key Activities text inside its container.
+        ka_pos = ka.get("position_in") or {}
+        ka_bottom = ka_pos.get("bottom")
+        ka_text_bottom = slide_data.get("ka_rendered_text_bottom_in")
+        if ka_pos and ka_bottom is not None:
+            x0, _, x1, _ = _rect_from_position(
+                ka_pos,
+                slide_width_in=slide_width_in,
+                slide_height_in=slide_height_in,
+                image_width_px=w_px,
+                image_height_px=h_px,
+            )
+            top_in = float(ka_text_bottom) if ka_text_bottom is not None else float(ka_pos.get("top") or 0)
+            y0 = _in_to_px_y(top_in, slide_height_in=slide_height_in, image_height_px=h_px)
+            y1 = _in_to_px_y(float(ka_bottom), slide_height_in=slide_height_in, image_height_px=h_px)
+            rect = (x0, y0, x1, max(y1, y0 + 8))
+            color = (37, 99, 235)
+            label = "Unused space here"
+
     elif rule_id.startswith("CONTENT-KA") and ka:
         ka_pos = ka.get("position_in") or {}
         if ka_pos:
@@ -165,7 +185,6 @@ def annotate_finding_image(
             image_width_px=w_px,
             image_height_px=h_px,
         )
-        color = (37, 99, 235)
 
     if rect:
         x0, y0, x1, y1 = rect

@@ -23,6 +23,7 @@ def build_report_payload(
     deck_pass: bool,
     findings: list[dict[str, Any]],
     checks_run: list[str],
+    slide_summaries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     counts = _count_by_severity(findings)
     slides_to_fix = sorted(
@@ -33,7 +34,7 @@ def build_report_payload(
         }
     )
     return {
-        "report_version": "v1",
+        "report_version": "v2",
         "source_file": str(source_file),
         "template_file": str(template_file) if template_file else None,
         "content_file": str(content_file) if content_file else None,
@@ -50,6 +51,7 @@ def build_report_payload(
             if deck_pass
             else f"FAIL — {counts.get('fail', 0)} issue(s) must be fixed before sending."
         ),
+        "slide_summaries": slide_summaries or [],
         "findings": findings,
     }
 

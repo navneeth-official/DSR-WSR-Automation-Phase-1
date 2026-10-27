@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +18,20 @@ from app.services.ppt_layout_metrics import EMU_PER_INCH
 from app.services.template_calibration import TemplateLayoutThresholds, load_thresholds
 from app.services.template_typography import TemplateTypographySpec, load_template_typography
 from app.validation.annotate import annotate_findings
+from app.validation.dedupe import dedupe_findings
 from app.validation.layout_checks import detect_supplemental_layout_violations
+from app.validation.metrics_summary import SlideCheckInput, build_slide_check_summaries
 from app.validation.report import build_report_payload, write_json_report, write_markdown_report
 from app.validation.severity import deck_passes, normalize_severity
 from app.validation.user_messages import enrich_finding
+
+CHECKS_RUN = [
+    "layout_geometry",
+    "typography_bullets",
+    "hl_waste_thresholds",
+    "footer_clearance",
+    "container_space",
+]
 
 
 @dataclass
@@ -31,6 +41,7 @@ class ValidationResult:
     report_json: Path
     report_md: Path
     annotation_dir: Path | None = None
+    slide_summaries: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _collect_violations(
@@ -73,7 +84,17 @@ def validate_deck(
     annotate: bool = False,
     thresholds: TemplateLayoutThresholds | None = None,
     use_rendered_bounds: bool = True,
+    report_json_path: str | Path | None = None,
+    report_md_path: str | Path | None = None,
+    annotation_dir: str | Path | None = None,
 ) -> ValidationResult:
+    """
+    Validate a generated deck.
+
+    By default outputs go to ``<output_dir>/validation_report.json|md`` and
+    ``<output_dir>/validation/``. ``report_json_path``, ``report_md_path`` and
+    ``annotation_dir`` override those locations (used for per-deck WSR output).
+    """
     ppt_path = Path(ppt_path).resolve()
     template_path = Path(template_path).resolve()
     thresholds = thresholds or load_thresholds()
@@ -90,6 +111,7 @@ def validate_deck(
         enrich_finding(violation, severity=normalize_severity(violation))
         for violation in raw_violations
     ]
+    findings = dedupe_findings(findings)
     findings.sort(
         key=lambda f: (
             0 if f.get("severity") == "fail" else 1,
@@ -99,7 +121,9 @@ def validate_deck(
     )
 
     out_dir = Path(output_dir) if output_dir else ppt_path.parent
-    annotation_dir = out_dir / "validation"
+    annotation_dir = Path(annotation_dir) if annotation_dir else out_dir / "validation"
+    report_json_path = Path(report_json_path) if report_json_path else out_dir / "validation_report.json"
+    report_md_path = Path(report_md_path) if report_md_path else out_dir / "validation_report.md"
     slides_by_index = {
         int(slide["slide_index"]): slide for slide in deck_data.get("slides", [])
     }
@@ -123,12 +147,26 @@ def validate_deck(
             for finding in findings:
                 finding.setdefault("annotation_error", str(exc))
 
-    checks_run = [
-        "layout_geometry",
-        "typography_bullets",
-        "hl_waste_thresholds",
-        "footer_clearance",
+    findings_by_slide: dict[int, list[dict[str, Any]]] = {}
+    for finding in findings:
+        if finding.get("slide_index") is not None:
+            findings_by_slide.setdefault(int(finding["slide_index"]), []).append(finding)
+
+    slide_inputs = [
+        SlideCheckInput(
+            slide_index=int(slide["slide_index"]),
+            title=str(slide.get("title") or ""),
+            violations=findings_by_slide.get(int(slide["slide_index"]), []),
+        )
+        for slide in deck_data.get("slides", [])
+        if slide.get("slide_index") is not None
     ]
+    slide_summaries = build_slide_check_summaries(
+        slide_inputs,
+        deck_data,
+        typography=typography,
+        checks_run=CHECKS_RUN,
+    )
 
     payload = build_report_payload(
         source_file=ppt_path,
@@ -136,11 +174,12 @@ def validate_deck(
         template_file=template_path,
         deck_pass=deck_passes(findings),
         findings=findings,
-        checks_run=checks_run,
+        checks_run=CHECKS_RUN,
+        slide_summaries=slide_summaries,
     )
 
-    report_json = write_json_report(payload, out_dir / "validation_report.json")
-    report_md = write_markdown_report(payload, out_dir / "validation_report.md")
+    report_json = write_json_report(payload, report_json_path)
+    report_md = write_markdown_report(payload, report_md_path)
 
     return ValidationResult(
         deck_pass=payload["deck_pass"],
@@ -148,4 +187,5 @@ def validate_deck(
         report_json=report_json,
         report_md=report_md,
         annotation_dir=annotation_dir if annotate else None,
+        slide_summaries=slide_summaries,
     )

@@ -13,6 +13,8 @@ import {
 import { WSRPptEditor } from "@/components/ppt-editor/WSRPptEditor";
 // import { WSRPptViewer } from "@/components/WSRPptViewer"; // MIGHT BE USED IN FUTURE — in-browser slide viewer with thumbnail rail
 import { FloatingNotice, useFloatingNotice } from "@/components/ui/FloatingNotice";
+import { SlideReviewButton, WsrSlidePanel } from "@/components/WsrSlidePanel";
+import { useWsrValidation } from "@/components/wsr/useWsrValidation";
 import { VariantRibbon, variantBadgeLabel } from "@/components/wsr/VariantRibbon";
 
 interface WSRReportPanelProps {
@@ -63,6 +65,7 @@ export function WSRReportPanel({
   const [result, setResult] = useState<WsrGenerateResponse | null>(null);
   const [deckReloadKey, setDeckReloadKey] = useState(0);
   const [activeVariant, setActiveVariant] = useState(variant);
+  const [slideReviewOpen, setSlideReviewOpen] = useState(false);
 
   const runGenerate = useCallback(
     async (force = true) => {
@@ -237,6 +240,9 @@ export function WSRReportPanel({
    * }, [mode, result, startDate, endDate, activeVariant]);
    */
 
+  // Validation starts only after the deck exists; the hook polls until the report is ready.
+  const validation = useWsrValidation(startDate, endDate, activeVariant, !!result && !loading);
+
   const downloadUrl =
     result?.download_url ?? wsrDownloadUrl(startDate, endDate, activeVariant);
   const cloudUrl = result?.cloud_web_url ?? result?.onedrive_web_url ?? null;
@@ -332,6 +338,12 @@ export function WSRReportPanel({
               {cloudOpenLabel}
             </a>
           ) : null}
+          {result ? (
+            <SlideReviewButton
+              onClick={() => setSlideReviewOpen(true)}
+              findingCount={validation.findingCount}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -345,6 +357,14 @@ export function WSRReportPanel({
         />
       ) : null}
 
+      <WsrSlidePanel
+        startDate={startDate}
+        endDate={endDate}
+        variant={activeVariant}
+        validation={validation}
+        open={slideReviewOpen}
+        onOpenChange={setSlideReviewOpen}
+        defaultContent={
       <div className="flex-1 min-h-0 overflow-hidden">
         {loading && (
           <div className="flex flex-col items-center justify-center h-full text-center px-6">
@@ -485,6 +505,8 @@ export function WSRReportPanel({
           </div>
         )}
       </div>
+        }
+      />
     </div>
   );
 }

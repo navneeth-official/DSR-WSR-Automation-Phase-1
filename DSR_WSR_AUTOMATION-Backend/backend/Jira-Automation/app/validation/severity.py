@@ -32,6 +32,12 @@ _FAIL_RULE_IDS = frozenset({
     "CONTENT-PRJ-01",
     "CONT-HL-01",
     "CONT-SPARSE-01",
+    "CONT-KA-01",
+    "LAYOUT-HL-LEFT",
+    "LAYOUT-HL-TOP",
+    "LAYOUT-HL-WIDTH",
+    "LAYOUT-KA-LEFT",
+    "LAYOUT-KA-WIDTH",
 })
 
 _WARN_RULE_IDS = frozenset({
@@ -45,6 +51,7 @@ _WARN_RULE_IDS = frozenset({
     "KA-PLC-02",
     "KA-PLC-03",
     "KA-PLC-04",
+    "LAYOUT-KA-TOP",
 })
 
 

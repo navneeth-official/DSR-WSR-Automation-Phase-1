@@ -21,6 +21,7 @@ from app.services.cloud_upload_service import (
 from app.services.onedrive_upload_service import load_onedrive_web_url
 from app.services.sharepoint_upload_service import load_sharepoint_web_url
 from app.services.wsr_template_upload_service import resolve_template_path
+from app.services.wsr_validation_service import run_wsr_validation  # noqa: F401 - re-exported
 from app.services.wsr_variant_service import (
     WSR_PPTX_RE,
     check_wsr_generation,
