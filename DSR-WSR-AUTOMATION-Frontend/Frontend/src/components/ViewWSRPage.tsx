@@ -9,8 +9,10 @@ import {
   Presentation,
 } from "lucide-react";
 import { fetchWsrWeeks, wsrTemplateThumbnailUrl, type WsrWeekSummary } from "@/api/wsr";
-import { SlideReviewButton, WsrSlidePanel } from "@/components/WsrSlidePanel";
+import { FloatingNotice } from "@/components/ui/FloatingNotice";
+import { RecheckDeckButton, SlideReviewButton, WsrSlidePanel } from "@/components/WsrSlidePanel";
 import { VariantRibbon, variantBadgeLabel } from "@/components/wsr/VariantRibbon";
+import { useRecheckDeck } from "@/components/wsr/useRecheckDeck";
 import { useWsrValidation } from "@/components/wsr/useWsrValidation";
 
 // list (weeks) → versions (week folder) → deck (details + slide review)
@@ -181,6 +183,17 @@ export function ViewWSRPage() {
     displayedDeck?.variant ?? 1,
     displayedDeck != null,
   );
+
+  // "Re-check deck": pull the latest SharePoint copy + re-validate (Slide Review stays a cached read).
+  const recheck = useRecheckDeck({
+    startDate: displayedDeck?.report_start_date ?? "",
+    endDate: displayedDeck?.report_end_date ?? "",
+    variant: displayedDeck?.variant ?? 1,
+    templateId: displayedDeck?.template_id ?? null,
+    fromSharepoint: Boolean(displayedDeck?.cloud_web_url),
+    onRefresh: validation.refresh,
+    onValidated: () => setSlideReviewOpen(true),
+  });
 
   useEffect(() => {
     const jump = Math.abs(viewIndex - prevViewIndexRef.current);
@@ -473,7 +486,16 @@ export function ViewWSRPage() {
           </div>
 
           {/* ── Panel 3: Deck details + Slide Review ── */}
-          <div className="w-1/3 h-full min-h-0 flex flex-col shrink-0 overflow-hidden">
+          <div className="relative w-1/3 h-full min-h-0 flex flex-col shrink-0 overflow-hidden">
+            {recheck.notice.message ? (
+              <FloatingNotice
+                message={recheck.notice.message}
+                exiting={recheck.notice.exiting}
+                onDismiss={recheck.notice.dismiss}
+                tone={recheck.notice.tone}
+                className="absolute top-4 left-1/2 z-50 w-[min(calc(100%-2rem),28rem)] -translate-x-1/2 text-xs"
+              />
+            ) : null}
             {displayedDeck ? (
               <>
                 <div className="px-6 py-4 bg-white border-b border-gray-200 flex-shrink-0">
@@ -581,6 +603,12 @@ export function ViewWSRPage() {
                             <SlideReviewButton
                               onClick={() => setSlideReviewOpen(true)}
                               findingCount={validation.findingCount}
+                              className="py-2 text-sm"
+                            />
+                            <RecheckDeckButton
+                              onClick={() => void recheck.recheck()}
+                              loading={recheck.rechecking}
+                              disabled={validation.phase === "pending"}
                               className="py-2 text-sm"
                             />
                           </div>

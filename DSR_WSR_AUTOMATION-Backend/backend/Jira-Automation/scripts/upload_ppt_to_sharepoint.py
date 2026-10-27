@@ -57,7 +57,8 @@ def main() -> int:
 
     print(f"Uploading: {ppt_path.name}")
     try:
-        web_url = upload_ppt_to_sharepoint(ppt_path)
+        item = upload_ppt_to_sharepoint(ppt_path)
+        web_url = item["webUrl"]
     except Exception as exc:
         print(f"Upload failed: {exc}")
         return 1

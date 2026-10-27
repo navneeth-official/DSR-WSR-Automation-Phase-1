@@ -100,6 +100,24 @@ def wsr_validation_meta_path(start_date: date, end_date: date, *, variant: int =
     return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation_meta.json"
 
 
+def wsr_validation_fingerprint_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """Remembers which SharePoint version (eTag) was last validated for this deck."""
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_validation_fingerprint.json"
+
+
+def wsr_sharepoint_meta_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """SharePoint item metadata (webUrl, id, eTag, …) for one deck variant.
+
+    Variant 1 maps to the legacy week-level ``WSR_<start>_<end>_sharepoint.json`` file.
+    """
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_sharepoint.json"
+
+
+def wsr_cloud_meta_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    """Cloud provider link for one deck variant (variant 1 == legacy week-level file)."""
+    return OUTPUT_DIR / f"{wsr_stem(start_date, end_date, variant=variant)}_cloud.json"
+
+
 def wsr_manifest_path(start_date: date, end_date: date) -> Path:
     """JSON manifest listing all generated variants for a report week."""
     stem = f"WSR_{start_date.isoformat()}_{end_date.isoformat()}"

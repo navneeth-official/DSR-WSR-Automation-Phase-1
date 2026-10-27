@@ -18,6 +18,8 @@ from app.schemas.wsr import (
     WsrJobStartResponse,
     WsrMeta,
     WsrPreviewSlide,
+    WsrRevalidateRequest,
+    WsrRevalidateResponse,
     WsrStatusResponse,
     WsrTemplateInfoResponse,
     WsrTemplateItemResponse,
@@ -38,6 +40,7 @@ from app.services.validation_upload_service import (
     restore_validation_report,
 )
 from app.services.wsr_validation_service import get_validation_status
+from app.services.wsr_revalidate_service import RevalidateBusyError, revalidate_wsr_deck
 from app.services.pptx_editor_service import (
     export_editor_document_to_pptx,
     load_wsr_editor_deck,
@@ -392,6 +395,34 @@ def run_wsr_validation_route(
     if not resolve_wsr_ppt_path(start_date, end_date, variant=variant).is_file():
         raise HTTPException(status_code=404, detail="No deck found for this week.")
     return start_validation_job(start_date=start_date, end_date=end_date, variant=variant)
+
+
+@router.post("/revalidate", response_model=WsrRevalidateResponse)
+def revalidate_wsr_deck_endpoint(body: WsrRevalidateRequest) -> WsrRevalidateResponse:
+    """Re-check a deck: pull the latest SharePoint copy (if configured) and re-validate it.
+
+    Runs synchronously and returns once the report + annotations are refreshed. When the
+    SharePoint copy is unchanged since the last check, nothing is downloaded or validated
+    (``status="unchanged"``) unless ``force`` is set.
+    """
+    try:
+        result = revalidate_wsr_deck(
+            body.start_date,
+            body.end_date,
+            variant=body.variant,
+            template_id=body.template_id,
+            from_sharepoint=body.from_sharepoint,
+            force=body.force,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RevalidateBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Re-check failed: {exc}") from exc
+    return WsrRevalidateResponse(**result)
 
 
 @router.get("/annotations")

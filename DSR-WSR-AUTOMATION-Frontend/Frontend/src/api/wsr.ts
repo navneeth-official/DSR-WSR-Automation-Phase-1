@@ -521,6 +521,51 @@ export async function runWsrValidation(
   return res.json() as Promise<WsrValidationStatus>;
 }
 
+export interface WsrRevalidateResponse {
+  /** `unchanged`: SharePoint copy matches the last check (nothing was re-run). */
+  status: "unchanged" | "validated";
+  message: string;
+  from_sharepoint: boolean;
+  pulled: boolean;
+  force: boolean;
+  variant: number;
+  template_id?: string | null;
+  eTag?: string | null;
+  deck_pass?: boolean | null;
+  findings_count?: number | null;
+  fail_count?: number | null;
+  warn_count?: number | null;
+}
+
+/**
+ * Re-check a deck: pull the latest SharePoint copy (when configured) and re-run validation.
+ * Runs synchronously on the server and can take a while for a changed deck.
+ */
+export async function revalidateWsrDeck(options: {
+  startDate: string;
+  endDate: string;
+  variant?: number;
+  templateId?: string | null;
+  /** Suggested value: `Boolean(deck.cloud_web_url)`. */
+  fromSharepoint?: boolean;
+  force?: boolean;
+}): Promise<WsrRevalidateResponse> {
+  const res = await fetch("/api/wsr/revalidate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      start_date: options.startDate,
+      end_date: options.endDate,
+      variant: options.variant ?? 1,
+      template_id: options.templateId ?? null,
+      from_sharepoint: options.fromSharepoint ?? true,
+      force: options.force ?? false,
+    }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json() as Promise<WsrRevalidateResponse>;
+}
+
 export function wsrAnnotationImageUrl(
   startDate: string,
   endDate: string,

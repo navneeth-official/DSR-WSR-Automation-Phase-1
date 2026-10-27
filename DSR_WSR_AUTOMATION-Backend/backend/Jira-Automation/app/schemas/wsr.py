@@ -16,6 +16,39 @@ class WsrGenerateRequest(BaseModel):
     )
 
 
+class WsrRevalidateRequest(BaseModel):
+    start_date: date = Field(description="WSR report period start (Monday, inclusive)")
+    end_date: date = Field(description="WSR report period end (Friday, inclusive)")
+    variant: int = Field(default=1, ge=1, description="Deck variant (_v2 suffix when > 1)")
+    template_id: str | None = Field(
+        default=None,
+        description="Override the template; otherwise taken from the week manifest",
+    )
+    from_sharepoint: bool = Field(
+        default=True,
+        description="Pull the latest SharePoint copy first when SharePoint is the active provider",
+    )
+    force: bool = Field(
+        default=False,
+        description="Ignore an eTag match and always download + validate",
+    )
+
+
+class WsrRevalidateResponse(BaseModel):
+    status: Literal["unchanged", "validated"]
+    message: str
+    from_sharepoint: bool = False
+    pulled: bool = False
+    force: bool = False
+    variant: int = 1
+    template_id: str | None = None
+    eTag: str | None = None
+    deck_pass: bool | None = None
+    findings_count: int | None = None
+    fail_count: int | None = None
+    warn_count: int | None = None
+
+
 class WsrGenerationCheckResponse(BaseModel):
     can_generate: bool
     reason: Literal["new_week", "different_template", "same_template"]

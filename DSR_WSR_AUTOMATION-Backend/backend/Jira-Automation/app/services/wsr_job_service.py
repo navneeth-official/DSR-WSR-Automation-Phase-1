@@ -10,6 +10,7 @@ from datetime import date
 from typing import Any, Literal
 
 from app.database import SessionLocal
+from app.services.wsr_revalidate_service import record_validation_fingerprint_from_sharepoint
 from app.services.wsr_service import generate_wsr_deck
 from app.services.wsr_validation_service import (
     begin_validation,
@@ -111,12 +112,20 @@ def start_wsr_job(
 
         if generated:
             # Validation never changes the job status; failures are recorded on disk.
-            run_wsr_validation(
+            summary = run_wsr_validation(
                 start_date,
                 end_date,
                 variant=variant,
                 template_id=job.template_id,
             )
+            if summary is not None:
+                # Lets the first "Re-check deck" skip work when SharePoint is unchanged.
+                record_validation_fingerprint_from_sharepoint(
+                    start_date,
+                    end_date,
+                    variant=variant,
+                    template_id=job.template_id,
+                )
 
     threading.Thread(target=_run, name=f"wsr-{job_id}", daemon=True).start()
     return job

@@ -54,6 +54,36 @@ export function SlideReviewButton({ onClick, findingCount, className = "" }: Sli
   );
 }
 
+/* ── Re-check deck button (pull SharePoint copy + re-validate) ──────────── */
+
+interface RecheckDeckButtonProps {
+  onClick: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+  className?: string;
+}
+
+/** Separate from `SlideReviewButton`: Slide Review stays instant, this one re-analyses. */
+export function RecheckDeckButton({
+  onClick,
+  loading = false,
+  disabled = false,
+  className = "",
+}: RecheckDeckButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={loading || disabled}
+      title="Pull the latest copy from SharePoint (if it changed) and re-run the slide checks"
+      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-red bg-white border border-brand-red/30 rounded-lg hover:bg-brand-red/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+    >
+      <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+      {loading ? "Re-checking…" : "Re-check deck"}
+    </button>
+  );
+}
+
 /* ── Small presentational pieces ────────────────────────────────────────── */
 
 function SeverityChip({ severity }: { severity: WsrFindingSeverity }) {

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from app.config import get_settings
-from app.paths import OUTPUT_DIR
+from app.paths import wsr_cloud_meta_path
 from app.services.google_drive_upload_service import (
     load_google_drive_web_url,
     save_google_drive_web_url,
@@ -22,15 +22,13 @@ from app.services.onedrive_upload_service import (
 )
 from app.services.sharepoint_upload_service import (
     load_sharepoint_web_url,
-    save_sharepoint_web_url,
+    save_sharepoint_item_meta,
     upload_ppt_to_sharepoint,
 )
 
 logger = logging.getLogger(__name__)
 
 CloudProvider = Literal["google_drive", "onedrive", "sharepoint"]
-
-_CLOUD_META_SUFFIX = "_cloud.json"
 
 
 def resolve_cloud_provider() -> CloudProvider | None:
@@ -55,8 +53,9 @@ def resolve_cloud_provider() -> CloudProvider | None:
     return None
 
 
-def cloud_meta_path(start_date: date, end_date: date) -> Path:
-    return OUTPUT_DIR / f"WSR_{start_date}_{end_date}{_CLOUD_META_SUFFIX}"
+def cloud_meta_path(start_date: date, end_date: date, *, variant: int = 1) -> Path:
+    # Variant 1 keeps the legacy week-level file name (WSR_<start>_<end>_cloud.json).
+    return wsr_cloud_meta_path(start_date, end_date, variant=variant)
 
 
 def save_cloud_meta(
@@ -65,16 +64,17 @@ def save_cloud_meta(
     *,
     web_url: str,
     provider: CloudProvider,
+    variant: int = 1,
 ) -> None:
-    path = cloud_meta_path(start_date, end_date)
+    path = cloud_meta_path(start_date, end_date, variant=variant)
     path.write_text(
         json.dumps({"webUrl": web_url, "provider": provider}, indent=2),
         encoding="utf-8",
     )
 
 
-def load_cloud_meta(start_date: date, end_date: date) -> dict | None:
-    path = cloud_meta_path(start_date, end_date)
+def load_cloud_meta(start_date: date, end_date: date, *, variant: int = 1) -> dict | None:
+    path = cloud_meta_path(start_date, end_date, variant=variant)
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -86,7 +86,7 @@ def load_cloud_meta(start_date: date, end_date: date) -> dict | None:
         except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
-    sharepoint_url = load_sharepoint_web_url(start_date, end_date)
+    sharepoint_url = load_sharepoint_web_url(start_date, end_date, variant=variant)
     if sharepoint_url:
         return {"web_url": sharepoint_url, "provider": "sharepoint"}
 
@@ -107,6 +107,7 @@ def try_upload_wsr_ppt(
     start_date: date | None = None,
     end_date: date | None = None,
     interactive: bool = False,
+    variant: int = 1,
 ) -> dict | None:
     """
     Upload WSR deck using the configured cloud provider.
@@ -136,23 +137,26 @@ def try_upload_wsr_ppt(
                 save_onedrive_web_url(start_date, end_date, web_url)
         elif provider == "sharepoint":
             # App-only auth — no interactive flag needed
-            web_url = upload_ppt_to_sharepoint(ppt_path)
+            item = upload_ppt_to_sharepoint(ppt_path)
+            web_url = str(item["webUrl"])
             if start_date is not None and end_date is not None:
-                save_sharepoint_web_url(start_date, end_date, web_url)
+                save_sharepoint_item_meta(start_date, end_date, item, variant=variant)
     except Exception as exc:
         logger.warning("%s upload failed: %s", provider, exc)
         print(f"Warning: {provider} upload failed: {exc}")
         return None
 
     if start_date is not None and end_date is not None:
-        save_cloud_meta(start_date, end_date, web_url=web_url, provider=provider)
+        save_cloud_meta(
+            start_date, end_date, web_url=web_url, provider=provider, variant=variant
+        )
 
     return {"web_url": web_url, "provider": provider}
 
 
-def cloud_response_fields(start_date: date, end_date: date) -> dict:
+def cloud_response_fields(start_date: date, end_date: date, *, variant: int = 1) -> dict:
     """Build API dict fields for cloud upload link (load from disk if present)."""
-    meta = load_cloud_meta(start_date, end_date)
+    meta = load_cloud_meta(start_date, end_date, variant=variant)
     if not meta:
         return {
             "cloud_web_url": None,
@@ -166,7 +170,11 @@ def cloud_response_fields(start_date: date, end_date: date) -> dict:
         "cloud_web_url": web_url,
         "cloud_provider": provider,
         "onedrive_web_url": web_url if provider == "onedrive" else load_onedrive_web_url(start_date, end_date),
-        "sharepoint_web_url": web_url if provider == "sharepoint" else load_sharepoint_web_url(start_date, end_date),
+        "sharepoint_web_url": (
+            web_url
+            if provider == "sharepoint"
+            else load_sharepoint_web_url(start_date, end_date, variant=variant)
+        ),
     }
 
 

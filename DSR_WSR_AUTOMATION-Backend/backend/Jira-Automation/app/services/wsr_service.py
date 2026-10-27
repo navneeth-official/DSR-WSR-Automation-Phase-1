@@ -118,6 +118,7 @@ def generate_wsr_deck(
         paths.ppt_path,
         start_date=start_date,
         end_date=end_date,
+        variant=resolved_variant,
     )
 
     preview_slides: list[dict] = []
@@ -226,7 +227,9 @@ def list_generated_wsr_weeks() -> list[dict]:
             _active_provider = resolve_cloud_provider()
             _cloud_web_url: str | None = None
             if _active_provider == "sharepoint":
-                _cloud_web_url = load_sharepoint_web_url(_start_date_obj, _end_date_obj)
+                _cloud_web_url = load_sharepoint_web_url(
+                    _start_date_obj, _end_date_obj, variant=variant
+                )
             elif _active_provider == "onedrive":
                 _cloud_web_url = load_onedrive_web_url(_start_date_obj, _end_date_obj)
 
@@ -326,7 +329,7 @@ def load_wsr_week(
         "preview": preview_text,
         "filename": paths.ppt_path.name,
         "download_url": download_url,
-        **cloud_response_fields(start_date, end_date),
+        **cloud_response_fields(start_date, end_date, variant=variant),
         "variant": variant,
         "variant_label": variant_label(variant),
         "template_id": variant_info.get("template_id") if variant_info else None,

@@ -13,7 +13,8 @@ import {
 import { WSRPptEditor } from "@/components/ppt-editor/WSRPptEditor";
 // import { WSRPptViewer } from "@/components/WSRPptViewer"; // MIGHT BE USED IN FUTURE — in-browser slide viewer with thumbnail rail
 import { FloatingNotice, useFloatingNotice } from "@/components/ui/FloatingNotice";
-import { SlideReviewButton, WsrSlidePanel } from "@/components/WsrSlidePanel";
+import { RecheckDeckButton, SlideReviewButton, WsrSlidePanel } from "@/components/WsrSlidePanel";
+import { useRecheckDeck } from "@/components/wsr/useRecheckDeck";
 import { useWsrValidation } from "@/components/wsr/useWsrValidation";
 import { VariantRibbon, variantBadgeLabel } from "@/components/wsr/VariantRibbon";
 
@@ -255,6 +256,17 @@ export function WSRReportPanel({
           ? "Open in OneDrive"
           : "Open in cloud";
 
+  // "Re-check deck": pull the latest SharePoint copy + re-validate (Slide Review stays a cached read).
+  const recheck = useRecheckDeck({
+    startDate,
+    endDate,
+    variant: activeVariant,
+    templateId: result?.template_id ?? templateId ?? null,
+    fromSharepoint: Boolean(cloudUrl),
+    onRefresh: validation.refresh,
+    onValidated: () => setSlideReviewOpen(true),
+  });
+
   return (
     <div className="relative flex flex-col h-full min-h-0 bg-brand-cream">
       <div className="relative z-10 flex items-center justify-between gap-3 px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0 overflow-hidden">
@@ -339,13 +351,30 @@ export function WSRReportPanel({
             </a>
           ) : null}
           {result ? (
-            <SlideReviewButton
-              onClick={() => setSlideReviewOpen(true)}
-              findingCount={validation.findingCount}
-            />
+            <>
+              <SlideReviewButton
+                onClick={() => setSlideReviewOpen(true)}
+                findingCount={validation.findingCount}
+              />
+              <RecheckDeckButton
+                onClick={() => void recheck.recheck()}
+                loading={recheck.rechecking}
+                disabled={loading || validation.phase === "pending"}
+              />
+            </>
           ) : null}
         </div>
       </div>
+
+      {recheck.notice.message ? (
+        <FloatingNotice
+          message={recheck.notice.message}
+          exiting={recheck.notice.exiting}
+          onDismiss={recheck.notice.dismiss}
+          tone={recheck.notice.tone}
+          className="absolute top-16 left-1/2 z-50 w-[min(calc(100%-3rem),32rem)] -translate-x-1/2 text-xs"
+        />
+      ) : null}
 
       {variantNotice ? (
         <FloatingNotice
