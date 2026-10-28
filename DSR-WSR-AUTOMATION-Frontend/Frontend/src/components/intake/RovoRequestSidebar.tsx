@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, Copy } from "lucide-react";
 import { isCatalogTrackActive, type TrackListItem } from "@/api/dsr";
 import { fetchEmployeesByTeam, type EmployeeTrackItem } from "@/api/employees";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { buildRovoRequestText, formatActivityDatePhrase, isoDate } from "@/lib/trackAssignees";
 import { AssigneeEditorPanel } from "./AssigneeEditorPanel";
 import { TrackEditorPanel } from "./TrackEditorPanel";
@@ -346,14 +347,9 @@ export function RovoRequestSidebar({
   });
 
   const copyRequest = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(requestText);
-      setCopyHint("Copied!");
-      setTimeout(() => setCopyHint(""), 2000);
-    } catch {
-      setCopyHint("Copy failed");
-      setTimeout(() => setCopyHint(""), 2000);
-    }
+    const copied = await copyTextToClipboard(requestText);
+    setCopyHint(copied ? "Copied!" : "Copy failed");
+    setTimeout(() => setCopyHint(""), 2000);
   }, [requestText]);
 
   const selectTab = (tab: SidebarTab) => {
