@@ -1,66 +1,33 @@
-"""Upload validation artefacts (report JSON + annotated PNGs) to SharePoint.
+"""Store validation artefacts (report JSON + annotated PNGs) in SharePoint.
 
-Local files stay the primary source (``local-first``). The SharePoint copy is a
-durable backup: if an annotation file is missing on disk (e.g. the VM output
-folder was cleaned) it is downloaded again from SharePoint using the item/drive
-ids stored in ``WSR_*_validation_meta.json``.
+Everything for one deck lives in ``<SharePoint data folder>/<deck stem>_validation/``
+(default ``Shared Documents/WSR/_data/WSR_<start>_<end>[_vN]_validation/``). The local copy
+is only a cache: when the report or an annotated image is missing locally it is downloaded
+again from that folder, addressed purely by path (no id bookkeeping needed).
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from datetime import date, datetime, timezone
+import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-import requests
-
-from app.config import get_settings
 from app.paths import (
     wsr_stem,
     wsr_validation_dir,
-    wsr_validation_meta_path,
     wsr_validation_report_path,
 )
-from app.services.cloud_upload_service import resolve_cloud_provider
-from app.services.sharepoint_upload_service import (
-    GRAPH_ROOT,
-    _build_sharepoint_upload_url,
-    get_sharepoint_access_token,
-)
+from app.services import sharepoint_storage as storage
 
 logger = logging.getLogger(__name__)
 
-
-def _put_file(path: Path, *, folder: str, filename: str, mime: str, token: str) -> dict[str, Any]:
-    url = _build_sharepoint_upload_url(folder, filename)
-    with path.open("rb") as handle:
-        response = requests.put(
-            url,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": mime},
-            data=handle,
-            timeout=120,
-        )
-    if response.status_code not in (200, 201):
-        raise RuntimeError(f"SharePoint upload failed ({response.status_code}): {response.text[:300]}")
-    payload = response.json()
-    return {
-        "web_url": payload.get("webUrl"),
-        "item_id": payload.get("id"),
-        "drive_id": (payload.get("parentReference") or {}).get("driveId"),
-    }
+_ANNOTATION_RE = re.compile(r"^slide_\d+_[a-z0-9._-]+\.png$")
 
 
-def load_validation_meta(start_date: date, end_date: date, *, variant: int = 1) -> dict[str, Any] | None:
-    path = wsr_validation_meta_path(start_date, end_date, variant=variant)
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
+def validation_remote_folder(start_date: date, end_date: date, *, variant: int = 1) -> str:
+    return f"{storage.data_folder()}/{wsr_stem(start_date, end_date, variant=variant)}_validation"
 
 
 def try_upload_validation_artifacts(
@@ -69,78 +36,78 @@ def try_upload_validation_artifacts(
     *,
     variant: int = 1,
 ) -> dict[str, Any] | None:
-    """Upload report + annotated PNGs when SharePoint is the active provider."""
-    if resolve_cloud_provider() != "sharepoint":
+    """Upload the report + annotated PNGs. Returns a small summary, or None when skipped."""
+    if not storage.storage_configured():
         return None
 
     report_path = wsr_validation_report_path(start_date, end_date, variant=variant)
     if not report_path.is_file():
         return None
 
-    settings = get_settings()
-    base_folder = (settings.sharepoint_upload_folder or "").strip() or "Shared Documents/WSR"
-    folder = f"{base_folder.strip('/')}/{wsr_stem(start_date, end_date, variant=variant)}_validation"
-    token = get_sharepoint_access_token()
+    folder = validation_remote_folder(start_date, end_date, variant=variant)
+    report_item = storage.upload_file(report_path, folder)
 
-    meta: dict[str, Any] = {
-        "provider": "sharepoint",
-        "folder": folder,
-        "uploaded_at": datetime.now(timezone.utc).isoformat(),
-        "report": _put_file(
-            report_path,
-            folder=folder,
-            filename=report_path.name,
-            mime="application/json",
-            token=token,
-        ),
-        "images": {},
-    }
-
+    uploaded_images = 0
+    current: set[str] = set()
     image_dir = wsr_validation_dir(start_date, end_date, variant=variant)
     if image_dir.is_dir():
         for image in sorted(image_dir.glob("slide_*_*.png")):
             try:
-                meta["images"][image.name] = _put_file(
-                    image, folder=folder, filename=image.name, mime="image/png", token=token
-                )
+                storage.upload_file(image, folder)
+                uploaded_images += 1
+                current.add(image.name)
             except Exception as exc:  # noqa: BLE001 - keep uploading the rest
                 logger.warning("Could not upload %s: %s", image.name, exc)
 
-    wsr_validation_meta_path(start_date, end_date, variant=variant).write_text(
-        json.dumps(meta, indent=2), encoding="utf-8"
-    )
-    return meta
+    # Drop annotated images from a previous run that no longer apply.
+    try:
+        for item in storage.list_folder(folder, use_cache=False):
+            name = str(item.get("name") or "")
+            if _ANNOTATION_RE.match(name) and name not in current:
+                storage.delete_file(folder, name)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not clean stale annotated images: %s", exc)
+
+    return {"folder": folder, "report": report_item, "images": uploaded_images}
 
 
-def _download_item(entry: dict[str, Any], destination: Path) -> bool:
-    drive_id, item_id = entry.get("drive_id"), entry.get("item_id")
-    if not drive_id or not item_id:
-        return False
-    token = get_sharepoint_access_token()
-    response = requests.get(
-        f"{GRAPH_ROOT}/drives/{drive_id}/items/{item_id}/content",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=60,
-    )
-    if response.status_code != 200:
-        return False
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(response.content)
-    return True
+def restore_validation_images(start_date: date, end_date: date, *, variant: int = 1) -> int:
+    """Download every annotated PNG that is missing locally. Returns how many were fetched."""
+    if not storage.storage_configured():
+        return 0
+    folder = validation_remote_folder(start_date, end_date, variant=variant)
+    image_dir = wsr_validation_dir(start_date, end_date, variant=variant)
+    restored = 0
+    try:
+        for item in storage.list_folder(folder, use_cache=False):
+            name = str(item.get("name") or "")
+            if not _ANNOTATION_RE.match(name) or (image_dir / name).is_file():
+                continue
+            if storage.download_file(folder, name, image_dir / name) is not None:
+                restored += 1
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not restore annotated images: %s", exc)
+    return restored
 
 
 def restore_validation_report(start_date: date, end_date: date, *, variant: int = 1) -> bool:
-    """Re-download the report JSON from SharePoint when it is missing locally."""
-    meta = load_validation_meta(start_date, end_date, variant=variant)
-    if not meta or not meta.get("report"):
+    """Re-download the report JSON (and annotated PNGs) from SharePoint when missing locally."""
+    if not storage.storage_configured():
         return False
+    report_path = wsr_validation_report_path(start_date, end_date, variant=variant)
     try:
-        return _download_item(
-            meta["report"], wsr_validation_report_path(start_date, end_date, variant=variant)
+        downloaded = storage.download_file(
+            validation_remote_folder(start_date, end_date, variant=variant),
+            report_path.name,
+            report_path,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not restore validation report: %s", exc)
         return False
+    if downloaded is None:
+        return False
+    restore_validation_images(start_date, end_date, variant=variant)
+    return True
 
 
 def restore_validation_image(
@@ -151,13 +118,15 @@ def restore_validation_image(
     variant: int = 1,
 ) -> Path | None:
     """Re-download one annotated PNG from SharePoint when it is missing locally."""
-    meta = load_validation_meta(start_date, end_date, variant=variant)
-    entry = ((meta or {}).get("images") or {}).get(filename)
-    if not entry:
+    if not storage.storage_configured() or not _ANNOTATION_RE.match(filename):
         return None
     destination = wsr_validation_dir(start_date, end_date, variant=variant) / filename
     try:
-        return destination if _download_item(entry, destination) else None
+        return storage.download_file(
+            validation_remote_folder(start_date, end_date, variant=variant),
+            filename,
+            destination,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not restore %s: %s", filename, exc)
         return None

@@ -3,23 +3,17 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.paths import OUTPUT_DIR, ensure_output_dir, wsr_preview_dir
+from app.paths import ensure_output_dir, wsr_preview_dir
 from app.services.ppt_content_builder import build_ppt_content
 from app.services.ppt_content_preview import format_content_preview
 from app.services.wsr_preview_service import export_wsr_slide_previews
-from app.services.cloud_upload_service import (
-    cloud_response_fields,
-    cloud_response_fields_from_upload,
-    try_upload_wsr_ppt,
-    resolve_cloud_provider,
-)
-from app.services.onedrive_upload_service import load_onedrive_web_url
-from app.services.sharepoint_upload_service import load_sharepoint_web_url
+from app.services import sharepoint_storage as storage
+from app.services import wsr_deck_store as deck_store
 from app.services.wsr_template_upload_service import resolve_template_path
 from app.services.wsr_validation_service import run_wsr_validation  # noqa: F401 - re-exported
 from app.services.wsr_variant_service import (
@@ -81,6 +75,9 @@ def generate_wsr_deck(
             f"start_date ({start_date}) must be on or before end_date ({end_date})."
         )
 
+    # SharePoint is the only durable store: fail before doing any expensive work.
+    storage.require_storage()
+
     generation_check = check_wsr_generation(start_date, end_date, template_id)
     if not generation_check["can_generate"]:
         raise WsrAlreadyGeneratedError(
@@ -106,19 +103,20 @@ def generate_wsr_deck(
 
     build_ppt_deck(paths.json_path, paths.ppt_path, template_path=template_path)
 
+    slide_count = _deck_slide_count(
+        paths.ppt_path,
+        wsr_preview_dir(start_date, end_date, variant=resolved_variant),
+    )
+
+    # Upload the deck + sidecars to SharePoint, then record it in the week manifest.
+    deck_item = deck_store.publish_deck(start_date, end_date, resolved_variant)
     variant_record = register_generated_variant(
         start_date,
         end_date,
         variant=resolved_variant,
         template_id=template_id,
         ppt_path=paths.ppt_path,
-    )
-
-    cloud_upload = try_upload_wsr_ppt(
-        paths.ppt_path,
-        start_date=start_date,
-        end_date=end_date,
-        variant=resolved_variant,
+        slide_count=slide_count,
     )
 
     preview_slides: list[dict] = []
@@ -147,7 +145,7 @@ def generate_wsr_deck(
         "json_filename": paths.json_path.name,
         "ppt_path": str(paths.ppt_path),
         "download_url": download_url,
-        **cloud_response_fields_from_upload(cloud_upload),
+        **deck_store.cloud_fields(deck_item),
         "variant": resolved_variant,
         "variant_label": variant_label(resolved_variant),
         "template_id": template_id,
@@ -182,32 +180,33 @@ def _deck_slide_count(ppt_path: Path, preview_dir: Path) -> int:
 
 
 def list_generated_wsr_weeks() -> list[dict]:
-    """Scan output/ for generated WSR .pptx files, newest first."""
-    if not OUTPUT_DIR.is_dir():
-        return []
+    """List the WSR decks stored in SharePoint, newest first."""
+    remote_decks = deck_store.remote_deck_items()
 
     seen_weeks: set[tuple[str, str]] = set()
-    for ppt_path in OUTPUT_DIR.glob("WSR_*.pptx"):
-        match = WSR_PPTX_RE.match(ppt_path.name)
+    for name in remote_decks:
+        match = WSR_PPTX_RE.match(name)
         if not match:
             continue
-        start_s, end_s = match.group(1), match.group(2)
-        seen_weeks.add((start_s, end_s))
+        seen_weeks.add((match.group(1), match.group(2)))
 
     weeks: list[dict] = []
     for start_s, end_s in seen_weeks:
         start_date = date.fromisoformat(start_s)
         end_date = date.fromisoformat(end_s)
-        sync_manifest_from_disk(start_date, end_date)
         for variant_info in list_week_variants(start_date, end_date):
             variant = int(variant_info.get("variant") or 1)
             paths = resolve_variant_paths(start_date, end_date, variant)
-            if not paths.ppt_path.is_file():
+            remote_item = remote_decks.get(paths.ppt_path.name)
+            if remote_item is None:
                 continue
 
             preview_dir = wsr_preview_dir(start_date, end_date, variant=variant)
-            slide_count = _deck_slide_count(paths.ppt_path, preview_dir)
+            slide_count = int(variant_info.get("slide_count") or 0) or _deck_slide_count(
+                paths.ppt_path, preview_dir
+            )
 
+            # Thumbnails come from the local render cache only (never render in a list call).
             thumbnail_url: str | None = None
             if preview_dir.is_dir() and any(preview_dir.glob("slide_*.png")):
                 thumbnail_url = (
@@ -215,23 +214,10 @@ def list_generated_wsr_weeks() -> list[dict]:
                     f"&end_date={end_s}&slide_index=1&variant={variant}"
                 )
 
-            generated_at = variant_info.get("generated_at")
-            if not generated_at:
-                generated_at = datetime.fromtimestamp(
-                    paths.ppt_path.stat().st_mtime
-                ).isoformat()
-
-            # Resolve the cloud upload URL for this variant (SharePoint / OneDrive)
-            _start_date_obj = date.fromisoformat(start_s)
-            _end_date_obj = date.fromisoformat(end_s)
-            _active_provider = resolve_cloud_provider()
-            _cloud_web_url: str | None = None
-            if _active_provider == "sharepoint":
-                _cloud_web_url = load_sharepoint_web_url(
-                    _start_date_obj, _end_date_obj, variant=variant
-                )
-            elif _active_provider == "onedrive":
-                _cloud_web_url = load_onedrive_web_url(_start_date_obj, _end_date_obj)
+            generated_at = variant_info.get("generated_at") or remote_item.get(
+                "lastModifiedDateTime"
+            )
+            cloud = deck_store.cloud_fields(remote_item)
 
             weeks.append(
                 {
@@ -249,8 +235,8 @@ def list_generated_wsr_weeks() -> list[dict]:
                         f"/api/wsr/download?start_date={start_s}&end_date={end_s}"
                         f"&variant={variant}"
                     ),
-                    "cloud_web_url": _cloud_web_url,
-                    "cloud_provider": _active_provider if _cloud_web_url else None,
+                    "cloud_web_url": cloud["cloud_web_url"],
+                    "cloud_provider": cloud["cloud_provider"],
                 }
             )
 
@@ -267,13 +253,16 @@ def load_wsr_week(
     *,
     variant: int = 1,
 ) -> dict:
-    """Load an already-generated WSR week from disk (no regeneration)."""
+    """Load an already-generated WSR week from SharePoint (no regeneration)."""
     paths = resolve_variant_paths(start_date, end_date, variant)
-    if not paths.ppt_path.is_file():
+    try:
+        deck_store.ensure_local_deck(start_date, end_date, variant)
+    except FileNotFoundError as exc:
         raise FileNotFoundError(
             f"No WSR deck found for {start_date} to {end_date} "
             f"({variant_label(variant)}). Call POST /api/wsr/generate first."
-        )
+        ) from exc
+    deck_store.restore_companions(start_date, end_date, variant)
 
     variant_info = next(
         (
@@ -329,7 +318,9 @@ def load_wsr_week(
         "preview": preview_text,
         "filename": paths.ppt_path.name,
         "download_url": download_url,
-        **cloud_response_fields(start_date, end_date, variant=variant),
+        **deck_store.cloud_fields(
+            deck_store.remote_deck_item(start_date, end_date, variant)
+        ),
         "variant": variant,
         "variant_label": variant_label(variant),
         "template_id": variant_info.get("template_id") if variant_info else None,

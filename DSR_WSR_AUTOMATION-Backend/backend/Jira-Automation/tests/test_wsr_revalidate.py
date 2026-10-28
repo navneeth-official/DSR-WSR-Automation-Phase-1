@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from app import paths
 from app.api.routes import wsr as wsr_routes
+from app.services import sharepoint_storage as storage
 from app.services import sharepoint_upload_service as sp
 from app.services import wsr_revalidate_service as rv
 from app.services import wsr_validation_service as svc
@@ -64,7 +65,8 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Harness:
     h = Harness(tmp_path)
     monkeypatch.setattr(paths, "OUTPUT_DIR", tmp_path)
     monkeypatch.setattr(svc, "OUTPUT_DIR", tmp_path)
-    monkeypatch.setattr(rv, "resolve_cloud_provider", lambda: "sharepoint")
+    monkeypatch.setattr(storage, "storage_configured", lambda: True)
+    monkeypatch.setattr(storage, "require_storage", lambda: None)
 
     def fake_metadata(filename: str) -> dict[str, Any]:
         if h.metadata_error:
@@ -219,14 +221,34 @@ def test_deck_missing_everywhere_is_404(harness: Harness, client: TestClient) ->
     assert response.status_code == 404
 
 
-def test_missing_local_deck_without_sharepoint_is_404(
+def test_sharepoint_not_configured_is_503(
     harness: Harness, client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(rv, "resolve_cloud_provider", lambda: None)
+    def not_configured() -> None:
+        raise storage.StorageNotConfiguredError("SharePoint storage is not configured.")
+
+    harness.write_local_deck()
+    monkeypatch.setattr(storage, "require_storage", not_configured)
 
     response = client.post("/api/wsr/revalidate", json=BODY)
 
-    assert response.status_code == 404
+    assert response.status_code == 503
+    assert "not configured" in response.json()["detail"]
+
+
+def test_local_only_check_fetches_deck_when_cache_was_cleaned(
+    harness: Harness, client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_download(folder: str, filename: str, destination: Path) -> Path:
+        destination.write_bytes(b"from-sharepoint")
+        return destination
+
+    monkeypatch.setattr(storage, "download_file", fake_download)
+
+    response = client.post("/api/wsr/revalidate", json={**BODY, "from_sharepoint": False})
+
+    assert response.status_code == 200
+    assert harness.ppt().read_bytes() == b"from-sharepoint"
 
 
 def test_template_unresolved_is_404(
@@ -271,7 +293,7 @@ def test_fingerprint_recorded_from_stored_upload_meta(harness: Harness) -> None:
 def test_fingerprint_not_recorded_without_sharepoint(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(rv, "resolve_cloud_provider", lambda: None)
+    monkeypatch.setattr(storage, "storage_configured", lambda: False)
     assert rv.record_validation_fingerprint_from_sharepoint(START, END, template_id="tpl1") is False
 
 

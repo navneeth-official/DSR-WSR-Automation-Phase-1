@@ -15,6 +15,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Pt
 
 from app.paths import OUTPUT_DIR, wsr_output_paths
+from app.services import wsr_deck_store as deck_store
 
 CANVAS_WIDTH = 1280
 CANVAS_HEIGHT = 720
@@ -370,8 +371,8 @@ def load_wsr_editor_deck(
 ) -> dict[str, Any]:
     """Load editor document for a WSR week, attaching slide preview images."""
     paths = wsr_output_paths(start_date, end_date)
-    if not paths.ppt_path.is_file():
-        raise FileNotFoundError(f"No deck found for {start_date} to {end_date}")
+    # Pulls the deck from SharePoint when the local cache does not have it.
+    deck_store.ensure_local_deck(start_date, end_date, 1)
 
     document = parse_pptx_to_editor_document(paths.ppt_path)
     document["sourcePptPath"] = str(paths.ppt_path)
@@ -398,6 +399,7 @@ def load_wsr_editor_deck(
 
 def save_wsr_editor_deck(start_date: date, end_date: date, document: dict[str, Any]) -> Path:
     path = OUTPUT_DIR / f"WSR_{start_date}_{end_date}_editor.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, indent=2), encoding="utf-8")
     return path
 

@@ -27,7 +27,8 @@ from app.paths import (
     wsr_validation_fingerprint_path,
     wsr_validation_report_path,
 )
-from app.services.cloud_upload_service import resolve_cloud_provider
+from app.services import sharepoint_storage as storage
+from app.services import wsr_deck_store as deck_store
 from app.services.sharepoint_upload_service import (
     download_ppt_from_sharepoint,
     get_sharepoint_item_metadata,
@@ -109,7 +110,7 @@ def record_validation_fingerprint_from_sharepoint(
     nobody edited the SharePoint copy. Never raises.
     """
     try:
-        if resolve_cloud_provider() != "sharepoint":
+        if not storage.storage_configured():
             return False
         filename = resolve_variant_paths(start_date, end_date, variant).ppt_path.name
         item = load_sharepoint_item_meta(start_date, end_date, variant=variant)
@@ -241,10 +242,13 @@ def _revalidate(
     if get_validation_status(start_date, end_date, variant=variant)["status"] == "pending":
         raise RevalidateBusyError("Validation is already running for this deck.")
 
+    # SharePoint is mandatory: never silently fall back to a local-only check.
+    storage.require_storage()
+
     ppt_path = resolve_variant_paths(start_date, end_date, variant).ppt_path
     template_id = template_id or _template_id_for_variant(start_date, end_date, variant)
 
-    use_sharepoint = from_sharepoint and resolve_cloud_provider() == "sharepoint"
+    use_sharepoint = from_sharepoint
 
     notes: list[str] = []
     remote: dict[str, Any] | None = None
@@ -263,6 +267,9 @@ def _revalidate(
             logger.warning("SharePoint metadata lookup failed for %s: %s", ppt_path.name, exc)
             notes.append("SharePoint was unavailable, so the local copy was checked.")
 
+    if remote is None and not ppt_path.is_file() and not use_sharepoint:
+        # Local-only check requested but the cache was cleaned: fetch the deck first.
+        deck_store.ensure_local_deck(start_date, end_date, variant)
     if remote is None and not ppt_path.is_file():
         raise FileNotFoundError(f"WSR deck not found: {ppt_path.name}")
 

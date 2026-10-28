@@ -1,20 +1,25 @@
-"""Track multiple WSR deck variants (templates) per report week."""
+"""Track multiple WSR deck variants (templates) per report week.
+
+The decks themselves live in SharePoint; the per-week manifest (which template produced
+which variant) is cached locally and mirrored to the SharePoint ``_data`` folder.
+"""
 
 from __future__ import annotations
 
 import json
-import re
+import logging
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.paths import OUTPUT_DIR, wsr_manifest_path, wsr_output_paths
+from app.services import wsr_deck_store as deck_store
+from app.services.wsr_deck_store import WSR_PPTX_RE
 from app.services.wsr_template_upload_service import get_template_info
 
-_WSR_PPTX_RE = re.compile(
-    r"^WSR_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})(?:_v(\d+))?\.pptx$"
-)
-WSR_PPTX_RE = _WSR_PPTX_RE
+logger = logging.getLogger(__name__)
+
+_WSR_PPTX_RE = WSR_PPTX_RE
 
 
 def variant_label(variant: int) -> str:
@@ -32,27 +37,35 @@ def _template_display_name(template_id: str | None) -> str:
     return str(info.get("original_filename") or info.get("filename") or template_id)
 
 
+def _empty_manifest(start_date: date, end_date: date) -> dict[str, Any]:
+    return {
+        "report_start_date": start_date.isoformat(),
+        "report_end_date": end_date.isoformat(),
+        "variants": [],
+    }
+
+
 def _load_manifest(start_date: date, end_date: date) -> dict[str, Any]:
     path = wsr_manifest_path(start_date, end_date)
     if not path.is_file():
-        return {
-            "report_start_date": start_date.isoformat(),
-            "report_end_date": end_date.isoformat(),
-            "variants": [],
-        }
+        try:
+            deck_store.restore_manifest(start_date, end_date)
+        except Exception as exc:  # noqa: BLE001 - rebuilt from the deck listing below
+            logger.warning("Could not restore manifest from SharePoint: %s", exc)
+    if not path.is_file():
+        return _empty_manifest(start_date, end_date)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return {
-            "report_start_date": start_date.isoformat(),
-            "report_end_date": end_date.isoformat(),
-            "variants": [],
-        }
+        return _empty_manifest(start_date, end_date)
+    if not isinstance(data, dict):
+        return _empty_manifest(start_date, end_date)
     data.setdefault("variants", [])
     return data
 
 
 def _save_manifest(start_date: date, end_date: date, manifest: dict[str, Any]) -> None:
+    """Write the local cache copy (SharePoint is updated by ``register_generated_variant``)."""
     path = wsr_manifest_path(start_date, end_date)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -77,24 +90,47 @@ def _variant_from_ppt(
     }
 
 
+def _variant_from_remote_item(item: dict[str, Any], *, variant: int) -> dict[str, Any]:
+    return {
+        "variant": variant,
+        "template_id": None,
+        "template_name": _template_display_name(None),
+        "filename": item.get("name"),
+        "generated_at": item.get("lastModifiedDateTime")
+        or datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def sync_manifest_from_disk(start_date: date, end_date: date) -> dict[str, Any]:
-    """Ensure manifest reflects on-disk .pptx files (including legacy v1 decks)."""
+    """Make the manifest reflect the decks that exist in SharePoint for this week.
+
+    Decks missing from the manifest (e.g. uploaded manually) are added; manifest entries
+    whose deck was deleted from SharePoint are dropped.
+    """
     manifest = _load_manifest(start_date, end_date)
-    known_filenames = {v.get("filename") for v in manifest["variants"]}
 
     start_s = start_date.isoformat()
     end_s = end_date.isoformat()
-    for ppt_path in sorted(OUTPUT_DIR.glob(f"WSR_{start_s}_{end_s}*.pptx")):
-        match = _WSR_PPTX_RE.match(ppt_path.name)
-        if not match or match.group(1) != start_s or match.group(2) != end_s:
+    remote = {
+        name: item
+        for name, item in deck_store.remote_deck_items().items()
+        if (m := _WSR_PPTX_RE.match(name)) and m.group(1) == start_s and m.group(2) == end_s
+    }
+
+    manifest["variants"] = [v for v in manifest["variants"] if v.get("filename") in remote]
+    known_filenames = {v.get("filename") for v in manifest["variants"]}
+
+    for name in sorted(remote):
+        if name in known_filenames:
             continue
-        if ppt_path.name in known_filenames:
-            continue
-        variant = int(match.group(3) or "1")
-        manifest["variants"].append(
-            _variant_from_ppt(start_date, end_date, ppt_path, variant=variant)
-        )
-        known_filenames.add(ppt_path.name)
+        variant = int(_WSR_PPTX_RE.match(name).group(3) or "1")  # type: ignore[union-attr]
+        local = OUTPUT_DIR / name
+        if local.is_file():
+            record = _variant_from_ppt(start_date, end_date, local, variant=variant)
+        else:
+            record = _variant_from_remote_item(remote[name], variant=variant)
+        manifest["variants"].append(record)
+        known_filenames.add(name)
 
     manifest["variants"] = sorted(
         manifest["variants"],
@@ -194,7 +230,9 @@ def register_generated_variant(
     variant: int,
     template_id: str,
     ppt_path: Path,
+    slide_count: int | None = None,
 ) -> dict[str, Any]:
+    """Record a freshly generated (and already published) deck in the week manifest."""
     manifest = sync_manifest_from_disk(start_date, end_date)
     record = _variant_from_ppt(
         start_date,
@@ -204,6 +242,8 @@ def register_generated_variant(
         template_id=template_id,
         template_name=_template_display_name(template_id),
     )
+    if slide_count:
+        record["slide_count"] = int(slide_count)
     manifest["variants"] = [
         v for v in manifest["variants"] if int(v.get("variant") or 1) != variant
     ]
@@ -213,6 +253,7 @@ def register_generated_variant(
         key=lambda item: int(item.get("variant") or 1),
     )
     _save_manifest(start_date, end_date, manifest)
+    deck_store.publish_manifest(start_date, end_date)
     return record
 
 

@@ -2,12 +2,40 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from datetime import date
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES_DIR = REPO_ROOT / "templates"
-OUTPUT_DIR = REPO_ROOT / "output"
+# Pre-SharePoint location of generated files. Only read by the one-time migration
+# script (scripts/migrate_output_to_sharepoint.py); the app never writes here.
+LEGACY_OUTPUT_DIR = REPO_ROOT / "output"
+
+
+def _resolve_work_dir() -> Path:
+    configured = os.getenv("WSR_WORK_DIR", "").strip()
+    if configured:
+        work_dir = Path(configured).expanduser().resolve()
+        if work_dir == REPO_ROOT or REPO_ROOT in work_dir.parents:
+            raise RuntimeError(
+                f"WSR_WORK_DIR ({work_dir}) must be outside the backend folder "
+                f"({REPO_ROOT}); WSR files are stored in SharePoint only."
+            )
+        return work_dir
+    return Path(tempfile.gettempdir()).resolve() / "dsr-wsr-work"
+
+
+# SharePoint is the only durable store for WSR templates and generated decks.
+# OUTPUT_DIR is a disposable scratch/cache directory OUTSIDE the repository that is
+# re-hydrated from SharePoint on demand (see app/services/wsr_deck_store.py).
+WORK_DIR = _resolve_work_dir()
+OUTPUT_DIR = WORK_DIR
 DATA_DIR = REPO_ROOT / "data"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 

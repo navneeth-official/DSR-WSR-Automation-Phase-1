@@ -11,6 +11,7 @@ from app.services.ppt_slide_images import (
     export_all_slides_to_png,
     list_all_slide_indices,
 )
+from app.services import wsr_deck_store as deck_store
 from app.services.wsr_variant_service import resolve_variant_paths
 
 
@@ -105,8 +106,12 @@ def export_wsr_slide_previews(
     """
     Return slide preview metadata for a generated WSR deck.
 
-    Reuses cached PNGs when present; otherwise exports via PowerPoint COM.
+    The deck is pulled from SharePoint when it is not in the local cache. Cached PNGs are
+    reused when present; otherwise slides are rendered again.
     """
+    # Raises FileNotFoundError when the deck is not in SharePoint either.
+    deck_store.ensure_local_deck(start_date, end_date, variant)
+
     if use_cache:
         cached = list_cached_wsr_slide_previews(
             start_date=start_date,
@@ -117,11 +122,6 @@ def export_wsr_slide_previews(
             return cached
 
     paths = resolve_variant_paths(start_date, end_date, variant)
-    if not paths.ppt_path.is_file():
-        raise FileNotFoundError(
-            f"No WSR deck found for {start_date} to {end_date} "
-            f"(variant {variant}): {paths.ppt_path}"
-        )
 
     preview_dir = wsr_preview_dir(start_date, end_date, variant=variant)
     preview_dir.mkdir(parents=True, exist_ok=True)
@@ -174,5 +174,13 @@ def resolve_preview_image_path(
         / f"slide_{slide_index:02d}.png"
     )
     if not image_path.is_file():
-        raise FileNotFoundError(f"Preview image not found: {image_path}")
+        # Cache was cleaned: pull the deck from SharePoint and render it again.
+        try:
+            export_wsr_slide_previews(
+                start_date=start_date, end_date=end_date, variant=variant, use_cache=True
+            )
+        except Exception:  # noqa: BLE001 - reported as "not found" below
+            pass
+    if not image_path.is_file():
+        raise FileNotFoundError(f"Preview image not found: {image_path.name}")
     return image_path

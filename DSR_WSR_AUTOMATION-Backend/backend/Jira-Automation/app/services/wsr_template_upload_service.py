@@ -1,31 +1,43 @@
-"""Store, list, preview, and resolve WSR templates under output/wsr_templates/."""
+"""Store, list, preview, and resolve WSR templates.
+
+Saved templates live ONLY in SharePoint (``SHAREPOINT_TEMPLATE_FOLDER``, default
+``Shared Documents/WSR Template``) under the **uploaded file's own name**
+(``My Template.pptx`` + ``My Template.json``; a repeat name becomes ``My Template (2).pptx``).
+
+The template id used by the API is derived from that name (``My_Template``), so an id can
+always be mapped back to its SharePoint file by listing the folder. The local
+``wsr_templates`` directory is a disposable cache (``<id>.pptx`` + ``<id>.json``) that is
+re-hydrated on demand. The staged *draft* (upload preview before "Save") only ever
+exists in the local work dir.
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.paths import (
-    UPLOADED_WSR_TEMPLATE_META,
-    UPLOADED_WSR_TEMPLATE_PPT,
     WSR_TEMPLATE_DRAFT_META,
     WSR_TEMPLATE_DRAFT_PPT,
     WSR_TEMPLATES_DIR,
     ensure_output_dir,
-    uploaded_wsr_template_preview_dir,
     wsr_template_draft_preview_dir,
     wsr_template_meta_path,
     wsr_template_ppt_path,
     wsr_template_preview_dir,
 )
+from app.services import sharepoint_storage as storage
 from app.services.ppt_slide_images import export_all_slides_to_png, list_all_slide_indices
 from app.utils.safe_fs import prepare_preview_directory, remove_directory
 
+logger = logging.getLogger(__name__)
+
 DRAFT_TEMPLATE_ID = "__draft__"
+_TEMPLATE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 PPT_MIME = (
     "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
@@ -62,38 +74,100 @@ def _ensure_templates_dir() -> Path:
     return WSR_TEMPLATES_DIR
 
 
-def _migrate_legacy_uploaded_template() -> None:
-    """Import the legacy single-slot upload into the template library once."""
-    _ensure_templates_dir()
-    if any(WSR_TEMPLATES_DIR.glob("*.pptx")):
-        return
-    if not UPLOADED_WSR_TEMPLATE_PPT.is_file():
-        return
+def template_id_from_stem(stem: str) -> str:
+    """API template id for a SharePoint file stem (``My Template (2)`` -> ``My_Template_2``)."""
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_")
+    return slug[:80] or "template"
 
-    template_id = uuid.uuid4().hex[:12]
+
+def safe_remote_stem(original_filename: str) -> str:
+    """The uploaded file's name without extension, cleaned for SharePoint."""
+    name = re.split(r"[\\/]", original_filename)[-1]
+    stem = name[: -len(".pptx")] if name.lower().endswith(".pptx") else Path(name).stem
+    stem = re.sub(r'[\\/:*?"<>|#%~&{}]+', "_", stem)
+    stem = re.sub(r"\s+", " ", stem).strip(" ._")
+    return stem[:100].rstrip(" ._") or "template"
+
+
+def _remote_template_stems(*, use_cache: bool = True) -> dict[str, str]:
+    """``{template id: SharePoint file stem}`` for every template in the folder."""
+    stems: dict[str, str] = {}
+    for item in storage.list_folder(storage.templates_folder(), use_cache=use_cache):
+        name = str(item.get("name") or "")
+        if name.lower().endswith(".pptx"):
+            stem = name[: -len(".pptx")]
+            stems.setdefault(template_id_from_stem(stem), stem)
+    return stems
+
+
+def claim_template_identity(original_filename: str) -> tuple[str, str]:
+    """Pick ``(template_id, sharepoint_stem)`` for a new upload.
+
+    The stem is the uploaded file's name; if that name (or its id) is already used by
+    another template, `` (2)``, `` (3)`` … is appended so nothing is overwritten.
+    """
+    base = safe_remote_stem(original_filename)
+    remote = _remote_template_stems(use_cache=False)
+    taken_ids = set(remote)
+    if WSR_TEMPLATES_DIR.is_dir():
+        taken_ids |= {path.stem for path in WSR_TEMPLATES_DIR.glob("*.pptx")}
+    taken_stems = {stem.lower() for stem in remote.values()}
+
+    stem, counter = base, 1
+    while stem.lower() in taken_stems or template_id_from_stem(stem) in taken_ids:
+        counter += 1
+        stem = f"{base} ({counter})"
+    return template_id_from_stem(stem), stem
+
+
+def _hydrate_template(template_id: str) -> bool:
+    """Make sure ``<id>.pptx`` (+ ``<id>.json``) are cached locally.
+
+    Returns False when the template does not exist (in SharePoint, for saved templates).
+    """
+    if template_id == DRAFT_TEMPLATE_ID:
+        return WSR_TEMPLATE_DRAFT_PPT.is_file()
+    if not _TEMPLATE_ID_RE.match(template_id):
+        return False
+
+    ppt_path = wsr_template_ppt_path(template_id)
+    if ppt_path.is_file():
+        return True
+
+    storage.require_storage()
+    stem = _remote_template_stems().get(template_id)
+    if stem is None:
+        return False
+
+    _ensure_templates_dir()
+    folder = storage.templates_folder()
+    if storage.download_file(folder, f"{stem}.pptx", ppt_path) is None:
+        return False
+
+    meta_path = wsr_template_meta_path(template_id)
+    if not meta_path.is_file():
+        try:
+            storage.download_file(folder, f"{stem}.json", meta_path)
+        except Exception as exc:  # noqa: BLE001 - metadata is optional
+            logger.warning("Could not restore template metadata %s.json: %s", stem, exc)
+    return True
+
+
+def _publish_template(template_id: str, remote_stem: str) -> None:
+    """Upload the cached template to SharePoint as ``<remote_stem>.pptx`` + ``.json``.
+
+    On failure the local copies are removed too, so nothing is left outside SharePoint.
+    """
     ppt_path = wsr_template_ppt_path(template_id)
     meta_path = wsr_template_meta_path(template_id)
-    stat = UPLOADED_WSR_TEMPLATE_PPT.stat()
-    original_filename = UPLOADED_WSR_TEMPLATE_PPT.name
-    legacy_meta = _read_meta(UPLOADED_WSR_TEMPLATE_META)
-    if legacy_meta.get("original_filename"):
-        original_filename = str(legacy_meta["original_filename"])
-
-    shutil.copy2(UPLOADED_WSR_TEMPLATE_PPT, ppt_path)
-    _write_meta(
-        meta_path,
-        {
-            "original_filename": original_filename,
-            "saved_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
-        },
-    )
-
-    legacy_preview = uploaded_wsr_template_preview_dir()
-    target_preview = wsr_template_preview_dir(template_id)
-    if legacy_preview.is_dir():
-        if target_preview.is_dir():
-            remove_directory(target_preview)
-        shutil.copytree(legacy_preview, target_preview)
+    folder = storage.templates_folder()
+    try:
+        storage.upload_file(ppt_path, folder, f"{remote_stem}.pptx")
+        storage.upload_file(meta_path, folder, f"{remote_stem}.json")
+    except Exception:
+        ppt_path.unlink(missing_ok=True)
+        meta_path.unlink(missing_ok=True)
+        raise
 
 
 def _template_ppt_for_id(template_id: str) -> Path:
@@ -170,18 +244,25 @@ def _build_template_info(
 
 
 def list_saved_templates() -> list[dict]:
-    _migrate_legacy_uploaded_template()
+    """Templates in the SharePoint template folder, newest first."""
+    storage.require_storage()
     _ensure_templates_dir()
 
     templates: list[dict] = []
-    for ppt_path in WSR_TEMPLATES_DIR.glob("*.pptx"):
-        template_id = ppt_path.stem
-        meta_path = wsr_template_meta_path(template_id)
+    for item in storage.list_folder(storage.templates_folder()):
+        name = str(item.get("name") or "")
+        if not name.lower().endswith(".pptx"):
+            continue
+        template_id = template_id_from_stem(name[: -len(".pptx")])
+        if any(t["id"] == template_id for t in templates):
+            continue
+        if not _hydrate_template(template_id):
+            continue
         templates.append(
             _build_template_info(
                 template_id=template_id,
-                ppt_path=ppt_path,
-                meta_path=meta_path,
+                ppt_path=wsr_template_ppt_path(template_id),
+                meta_path=wsr_template_meta_path(template_id),
             )
         )
 
@@ -207,9 +288,9 @@ def get_template_info(template_id: str) -> dict | None:
     if template_id == DRAFT_TEMPLATE_ID:
         return get_draft_template_info()
 
-    ppt_path = wsr_template_ppt_path(template_id)
-    if not ppt_path.is_file():
+    if not _hydrate_template(template_id):
         return None
+    ppt_path = wsr_template_ppt_path(template_id)
     return _build_template_info(
         template_id=template_id,
         ppt_path=ppt_path,
@@ -222,10 +303,12 @@ def resolve_template_path(template_id: str | None) -> Path:
     if not template_id or template_id == DRAFT_TEMPLATE_ID:
         raise ValueError("A saved template must be selected for WSR generation.")
 
-    ppt_path = wsr_template_ppt_path(template_id)
-    if not ppt_path.is_file():
-        raise FileNotFoundError(f"WSR template not found: {template_id}")
-    return ppt_path
+    if not _hydrate_template(template_id):
+        raise FileNotFoundError(
+            f"WSR template not found: {template_id} "
+            f"(looked in SharePoint folder '{storage.templates_folder()}')"
+        )
+    return wsr_template_ppt_path(template_id)
 
 
 def stage_template_upload(*, content: bytes, original_filename: str) -> dict:
@@ -265,20 +348,23 @@ def save_draft_template() -> dict:
     if not WSR_TEMPLATE_DRAFT_PPT.is_file():
         raise FileNotFoundError("No staged template to save.")
 
+    storage.require_storage()
     _ensure_templates_dir()
-    template_id = uuid.uuid4().hex[:12]
+    draft_meta = _read_meta(WSR_TEMPLATE_DRAFT_META)
+    original_filename = str(draft_meta.get("original_filename") or "template.pptx")
+    template_id, remote_stem = claim_template_identity(original_filename)
     ppt_path = wsr_template_ppt_path(template_id)
     meta_path = wsr_template_meta_path(template_id)
 
     shutil.copy2(WSR_TEMPLATE_DRAFT_PPT, ppt_path)
-    draft_meta = _read_meta(WSR_TEMPLATE_DRAFT_META)
     _write_meta(
         meta_path,
         {
-            "original_filename": draft_meta.get("original_filename") or ppt_path.name,
+            "original_filename": original_filename,
             "saved_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+    _publish_template(template_id, remote_stem)
 
     draft_preview = wsr_template_draft_preview_dir()
     target_preview = wsr_template_preview_dir(template_id)
@@ -312,8 +398,9 @@ def save_uploaded_template(*, content: bytes, original_filename: str) -> dict:
     if not original_filename.lower().endswith(".pptx"):
         raise ValueError("Only .pptx files are supported.")
 
+    storage.require_storage()
     _ensure_templates_dir()
-    template_id = uuid.uuid4().hex[:12]
+    template_id, remote_stem = claim_template_identity(original_filename)
     ppt_path = wsr_template_ppt_path(template_id)
     meta_path = wsr_template_meta_path(template_id)
 
@@ -325,6 +412,7 @@ def save_uploaded_template(*, content: bytes, original_filename: str) -> dict:
             "saved_at": datetime.now(timezone.utc).isoformat(),
         },
     )
+    _publish_template(template_id, remote_stem)
 
     preview_dir = wsr_template_preview_dir(template_id)
     prepare_preview_directory(preview_dir)
@@ -370,9 +458,9 @@ def list_cached_template_slide_previews(
     if not resolved_id:
         return None
 
-    ppt_path = _template_ppt_for_id(resolved_id)
-    if not ppt_path.is_file():
+    if not _hydrate_template(resolved_id):
         return None
+    ppt_path = _template_ppt_for_id(resolved_id)
 
     preview_dir = _template_preview_dir_for_id(resolved_id)
     if not preview_dir.is_dir():
@@ -431,9 +519,9 @@ def export_template_slide_previews(
         if cached is not None:
             return cached
 
-    ppt_path = _template_ppt_for_id(resolved_id)
-    if not ppt_path.is_file():
+    if not _hydrate_template(resolved_id):
         raise FileNotFoundError(f"WSR template not found: {resolved_id}")
+    ppt_path = _template_ppt_for_id(resolved_id)
 
     preview_dir = _template_preview_dir_for_id(resolved_id)
     prepare_preview_directory(preview_dir)
@@ -484,6 +572,12 @@ def resolve_template_preview_image_path(
     image_path = (
         _template_preview_dir_for_id(resolved_id) / f"slide_{slide_index:02d}.png"
     )
+    if not image_path.is_file() and resolved_id != DRAFT_TEMPLATE_ID:
+        # Cache was cleaned: pull the template from SharePoint and render it again.
+        try:
+            export_template_slide_previews(template_id=resolved_id, use_cache=True)
+        except Exception as exc:  # noqa: BLE001 - reported as "not found" below
+            logger.warning("Could not rebuild template previews for %s: %s", resolved_id, exc)
     if not image_path.is_file():
         raise FileNotFoundError(f"Template preview image not found: {image_path}")
     return image_path

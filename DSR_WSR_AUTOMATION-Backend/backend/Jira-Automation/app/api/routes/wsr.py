@@ -35,8 +35,11 @@ from app.paths import (
     wsr_validation_dir,
     wsr_validation_report_path,
 )
+from app.services import sharepoint_storage as storage
+from app.services import wsr_deck_store as deck_store
 from app.services.validation_upload_service import (
     restore_validation_image,
+    restore_validation_images,
     restore_validation_report,
 )
 from app.services.wsr_validation_service import get_validation_status
@@ -50,10 +53,6 @@ from app.services.wsr_job_service import get_job, start_validation_job, start_ws
 from app.services.wsr_preview_service import (
     export_wsr_slide_previews,
     resolve_preview_image_path,
-)
-from app.services.cloud_upload_service import (
-    cloud_response_fields_from_upload,
-    try_upload_wsr_ppt,
 )
 from app.services.wsr_service import (
     generate_wsr_deck,
@@ -166,6 +165,9 @@ def generate_wsr(
     Poll GET /api/wsr/status until status is completed or failed.
     """
     del db  # generation uses its own DB session in the worker thread
+
+    # SharePoint is the only store for templates and decks: fail fast (HTTP 503).
+    storage.require_storage()
 
     if body.start_date > body.end_date:
         raise HTTPException(
@@ -292,15 +294,16 @@ def download_wsr_deck(
     variant: int = Query(1, ge=1, description="WSR deck variant (1=primary, 2=V2, …)"),
 ) -> FileResponse:
     """Download the generated PowerPoint for a WSR week."""
-    ppt_path = resolve_wsr_ppt_path(start_date, end_date, variant=variant)
-    if not ppt_path.is_file():
+    try:
+        ppt_path = deck_store.ensure_local_deck(start_date, end_date, variant)
+    except FileNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail=(
                 f"No deck found for {start_date} to {end_date}. "
                 "Call POST /api/wsr/generate first."
             ),
-        )
+        ) from exc
     return FileResponse(
         path=Path(ppt_path),
         media_type=(
@@ -392,8 +395,10 @@ def run_wsr_validation_route(
     variant: int = Query(1, ge=1, description="WSR deck variant (1=primary, 2=V2, …)"),
 ) -> dict:
     """(Re)run validation for an existing deck in the background."""
-    if not resolve_wsr_ppt_path(start_date, end_date, variant=variant).is_file():
-        raise HTTPException(status_code=404, detail="No deck found for this week.")
+    try:
+        deck_store.ensure_local_deck(start_date, end_date, variant)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="No deck found for this week.") from exc
     return start_validation_job(start_date=start_date, end_date=end_date, variant=variant)
 
 
@@ -418,6 +423,8 @@ def revalidate_wsr_deck_endpoint(body: WsrRevalidateRequest) -> WsrRevalidateRes
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RevalidateBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except storage.StorageNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -433,10 +440,12 @@ def list_wsr_annotations(
 ) -> list[dict]:
     """Annotated slide images for a deck (``slide_{index}_{rule-id}.png``), with slide numbers."""
     directory = wsr_validation_dir(start_date, end_date, variant=variant)
+    report = _read_validation_report(start_date, end_date, variant) or {}
+    if report and not (directory.is_dir() and any(directory.glob("slide_*_*.png"))):
+        # Local cache was cleaned: fetch the annotated images from SharePoint.
+        restore_validation_images(start_date, end_date, variant=variant)
     if not directory.is_dir():
         return []
-
-    report = _read_validation_report(start_date, end_date, variant) or {}
     number_by_index = {
         int(s["slide_index"]): int(s["slide_number"])
         for s in report.get("slide_summaries") or []
@@ -556,17 +565,15 @@ def sync_editor_deck(
     """Apply editor changes directly to the .pptx and refresh slide preview images."""
     paths = wsr_output_paths(start_date, end_date)
     try:
+        deck_store.ensure_local_deck(start_date, end_date, 1)
         export_editor_document_to_pptx(body.document, paths.ppt_path)
         save_wsr_editor_deck(start_date, end_date, body.document)
+        # SharePoint holds the only durable copy: publish before refreshing previews.
+        deck_item = deck_store.publish_deck_file(start_date, end_date, 1)
         preview_slides = export_wsr_slide_previews(
             start_date=start_date,
             end_date=end_date,
             use_cache=False,
-        )
-        cloud_upload = try_upload_wsr_ppt(
-            paths.ppt_path,
-            start_date=start_date,
-            end_date=end_date,
         )
     except Exception as exc:
         raise HTTPException(
@@ -576,7 +583,7 @@ def sync_editor_deck(
     return {
         "ok": True,
         "preview_slides": preview_slides,
-        **cloud_response_fields_from_upload(cloud_upload),
+        **deck_store.cloud_fields(deck_item),
     }
 
 
@@ -589,8 +596,10 @@ def export_editor_deck(
     """Export the edited document back to .pptx."""
     paths = wsr_output_paths(start_date, end_date)
     try:
+        deck_store.ensure_local_deck(start_date, end_date, 1)
         export_editor_document_to_pptx(body.document, paths.ppt_path)
         save_wsr_editor_deck(start_date, end_date, body.document)
+        deck_store.publish_deck_file(start_date, end_date, 1)
         try:
             export_wsr_slide_previews(
                 start_date=start_date,

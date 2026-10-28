@@ -107,8 +107,8 @@ def _build_sharepoint_item_url(folder: str, filename: str) -> str:
         )
 
     folder = folder.strip().strip("/")
-    filename = filename.strip().lstrip("/")
-    item_path = f"{folder}/{filename}" if folder else filename
+    filename = filename.strip().strip("/")
+    item_path = "/".join(part for part in (folder, filename) if part)
 
     if drive_id:
         # Explicit drive (e.g. a specific document library, not the default one)
@@ -120,6 +120,11 @@ def _build_sharepoint_item_url(folder: str, filename: str) -> str:
 def _build_sharepoint_upload_url(folder: str, filename: str) -> str:
     """Build the Graph API PUT URL for the target SharePoint document library."""
     return f"{_build_sharepoint_item_url(folder, filename)}/content"
+
+
+def _build_sharepoint_children_url(folder: str) -> str:
+    """Graph URL listing the children of a folder addressed by path."""
+    return f"{_build_sharepoint_item_url(folder, '')}/children"
 
 
 def _upload_folder() -> str:

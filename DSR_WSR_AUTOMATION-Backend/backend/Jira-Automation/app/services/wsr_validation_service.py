@@ -26,6 +26,7 @@ from app.paths import (
     wsr_validation_report_path,
     wsr_validation_status_path,
 )
+from app.services import wsr_deck_store as deck_store
 from app.services.wsr_template_upload_service import resolve_template_path
 from app.services.wsr_variant_service import list_week_variants, resolve_variant_paths
 
@@ -170,9 +171,8 @@ def run_wsr_validation(
     from app.validation.engine import validate_deck
 
     try:
-        ppt_path = resolve_variant_paths(start_date, end_date, variant).ppt_path
-        if not ppt_path.is_file():
-            raise FileNotFoundError(f"WSR deck not found: {ppt_path.name}")
+        # Uses the cached deck, downloading it from SharePoint when the cache was cleaned.
+        ppt_path = deck_store.ensure_local_deck(start_date, end_date, variant)
 
         begin_validation(start_date, end_date, variant=variant)
 

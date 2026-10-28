@@ -68,6 +68,18 @@ class Settings:
     )
     # Optional: explicit drive ID — blank → use site's default document library
     sharepoint_drive_id: str = os.getenv("SHAREPOINT_DRIVE_ID", "")
+    # WSR template library (uploaded .pptx templates + their .json metadata live here)
+    sharepoint_template_folder: str = os.getenv(
+        "SHAREPOINT_TEMPLATE_FOLDER", "Shared Documents/WSR Template"
+    )
+    # Sidecar files for each deck (content JSON, preview text, manifest, validation
+    # report + annotated images). Blank -> "<SHAREPOINT_UPLOAD_FOLDER>/_data".
+    sharepoint_data_folder: str = os.getenv("SHAREPOINT_DATA_FOLDER", "")
+    # Local scratch directory (disposable cache; SharePoint is the only durable store).
+    # Blank -> <system temp>/dsr-wsr-work. Must be OUTSIDE the repository.
+    wsr_work_dir: str = os.getenv("WSR_WORK_DIR", "")
+    # Cached files in the work dir older than this are deleted at startup.
+    wsr_cache_max_age_hours: float = float(os.getenv("WSR_CACHE_MAX_AGE_HOURS", "24"))
 
     # Cloud upload provider: google_drive | onedrive | sharepoint | (empty = use *_UPLOAD_ENABLED flags)
     cloud_upload_provider: str = os.getenv("CLOUD_UPLOAD_PROVIDER", "")
