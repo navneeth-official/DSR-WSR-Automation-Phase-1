@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app import paths
 from app.api.routes import wsr as wsr_routes
+from app.services import sharepoint_storage as storage
 from app.services import wsr_validation_service as svc
 
 START = date(2026, 10, 26)
@@ -24,6 +25,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(paths, "OUTPUT_DIR", tmp_path)
     monkeypatch.setattr(wsr_routes, "OUTPUT_DIR", tmp_path)
     monkeypatch.setattr(svc, "OUTPUT_DIR", tmp_path)
+    # Keep the test local: never reach out to a real SharePoint site configured in .env.
+    monkeypatch.setattr(storage, "storage_configured", lambda: False)
     app = FastAPI()
     app.include_router(wsr_routes.router)
     return TestClient(app)

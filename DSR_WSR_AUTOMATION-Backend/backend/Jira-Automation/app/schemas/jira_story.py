@@ -21,7 +21,9 @@ class JiraStorySaveRequest(BaseModel):
     date_assigned: FlexibleDate = Field(default=None, description="Date Assigned")
     status: str = Field(description="Status")
     story_points: Decimal | None = Field(default=None, description="Story Points")
-    percent_complete: Decimal | None = Field(default=None, description="% Complete")
+    percent_complete: Decimal | None = Field(
+        default=None, ge=0, le=100, description="% Complete (0-100)"
+    )
     assignee: str | None = Field(default=None, description="Assignee")
     reportee: str | None = Field(default=None, description="Reportee")
     comment: str | None = Field(

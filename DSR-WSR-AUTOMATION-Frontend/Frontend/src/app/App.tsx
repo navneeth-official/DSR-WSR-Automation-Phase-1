@@ -12,6 +12,7 @@ import {
   fetchStoriesByTrack,
   importStories,
   recordToSavePayload,
+  statusDefaultPercent,
   regenerateStoryTitle,
   storiesToLatestRecords,
   storiesToRecords,
@@ -975,6 +976,61 @@ function DsrEditableInput({
       }}
       className={`w-full min-w-0 px-2 py-1 border border-transparent hover:border-gray-200 focus:border-brand-red/40 rounded text-xs bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-red/30 ${className}`}
     />
+  );
+}
+
+/** Editable 0-100 % complete: clamps on blur and only saves when the value changed. */
+function DsrEditablePercent({
+  value,
+  onSave,
+}: {
+  value: number;
+  onSave: (v: number | null) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed === "") {
+      // Cleared: fall back to the status-based default.
+      setDraft(String(value));
+      onSave(null);
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isNaN(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    const clamped = Math.min(100, Math.max(0, Math.round(parsed)));
+    setDraft(String(clamped));
+    if (clamped !== value) onSave(clamped);
+  };
+
+  return (
+    <span className="inline-flex items-center">
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step={1}
+        inputMode="numeric"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setDraft(String(value));
+            e.currentTarget.blur();
+          }
+        }}
+        aria-label="% Complete"
+        className="w-12 min-w-0 px-1 py-1 text-right border border-transparent hover:border-gray-200 focus:border-brand-red/40 rounded text-xs font-semibold bg-transparent focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-red/30 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <span className="text-xs text-gray-500">%</span>
+    </span>
   );
 }
 
@@ -3296,11 +3352,14 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
 
   const handleFieldSave = (row: JiraStoryRecord, field: keyof JiraStoryRecord, value: string | number | null) => {
     const rowKey = storyRowKey(row);
-    patchRow(rowKey, { [field]: value } as Partial<JiraStoryRecord>);
-    const updated = { ...row, [field]: value };
+    const patch = { [field]: value } as Partial<JiraStoryRecord>;
+    // Changing the status resets % Complete to that status's default (user can edit it after).
+    if (field === "status") patch.percent_complete = statusDefaultPercent(String(value));
+    patchRow(rowKey, patch);
+    const updated = { ...row, ...patch };
     if (row.isDraft) {
       if (updated.jira_key && updated.title?.trim()) {
-        void persistRow(row, { [field]: value } as Partial<JiraStoryRecord>);
+        void persistRow(row, patch);
       }
     } else {
       void persistRow(updated);
@@ -3449,7 +3508,7 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
             {!loading && displayRows.map((row, i) => {
               const record = row as JiraStoryRecord;
               const rowKey = storyRowKey(record);
-              const pct = completionPct(row.status);
+              const pct = Math.min(100, Math.max(0, record.percent_complete ?? completionPct(row.status)));
               const expanded = titleSpotlight.isExpanded(row.jira_key);
               const isSaving = savingKey === rowKey;
               return (
@@ -3529,7 +3588,10 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
                           style={{ width: `${pct}%` }}
                         />
                       </div>
-                      <span className={`text-xs font-semibold w-8 text-right ${pct === 100 ? "text-green-600" : pct > 0 ? "text-blue-600" : "text-gray-400"}`}>{pct}%</span>
+                      <DsrEditablePercent
+                        value={pct}
+                        onSave={(v) => handleFieldSave(record, "percent_complete", v)}
+                      />
                     </div>
                   </td>
                   <td className="px-4 py-3 text-gray-700 whitespace-nowrap">

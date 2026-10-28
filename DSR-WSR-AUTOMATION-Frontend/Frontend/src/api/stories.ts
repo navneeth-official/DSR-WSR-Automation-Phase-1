@@ -45,6 +45,8 @@ export interface JiraStoryRecord {
   reporter: string;
   status: string;
   story_points: number | null;
+  /** Stored % complete (0-100). Null/undefined -> derived from status. */
+  percent_complete?: number | null;
   created_date: string;
   updated_date: string;
   resolved_date: string | null;
@@ -202,6 +204,7 @@ export function apiStoryToRecord(s: JiraStoryApiResponse): JiraStoryRecord {
     reportee: s.reportee ?? undefined,
     status: s.status,
     story_points: toNum(s.story_points),
+    percent_complete: toNum(s.percent_complete),
     created_date: s.date_assigned ?? "",
     date_assigned: s.date_assigned ?? "",
     updated_date: s.updated_date ?? "",
@@ -211,13 +214,17 @@ export function apiStoryToRecord(s: JiraStoryApiResponse): JiraStoryRecord {
   };
 }
 
+/** Default % complete for a status (used until the user edits the value). */
+export function statusDefaultPercent(status: string): number {
+  return status === "Done" ? 100 : status === "In Progress" ? 50 : 0;
+}
+
 export function recordToSavePayload(
   row: JiraStoryRecord,
   trackCode?: string,
 ): StorySavePayload {
-  const pct = toNum(
-    row.status === "Done" ? 100 : row.status === "In Progress" ? 50 : 0,
-  );
+  // A user-entered % wins; otherwise fall back to the status default.
+  const pct = row.percent_complete ?? statusDefaultPercent(row.status);
   return {
     jira_key: row.jira_key,
     summary: row.summary,
