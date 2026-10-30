@@ -112,7 +112,7 @@ def _build_summary(stories: list[JiraStory]) -> DsrStatusSummary:
     completion_count = 0
 
     for story in stories:
-        normalized = story.status.strip().lower()
+        normalized = (story.status or "").strip().lower()
         if normalized in {"done", "closed", "resolved"}:
             done += 1
         elif normalized in {"in progress", "in review", "in development"}:

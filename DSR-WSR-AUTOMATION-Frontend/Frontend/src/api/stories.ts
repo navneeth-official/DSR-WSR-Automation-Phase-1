@@ -216,7 +216,7 @@ export function apiStoryToRecord(s: JiraStoryApiResponse): JiraStoryRecord {
 
 /** Default % complete for a status (used until the user edits the value). */
 export function statusDefaultPercent(status: string): number {
-  return status === "Done" ? 100 : status === "In Progress" ? 50 : 0;
+  return status === "Done" ? 100 : status === "In Progress" || status === "In Review" ? 50 : 0;
 }
 
 export function recordToSavePayload(

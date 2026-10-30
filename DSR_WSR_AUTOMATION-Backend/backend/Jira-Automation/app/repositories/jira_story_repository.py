@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.constants.story_status import resolve_status_id_or_default
 from app.models.jira_story import JiraStory
 from app.models.project import Project
 from app.models.sprint import Sprint
@@ -287,7 +288,7 @@ class JiraStoryRepository:
                 priority=priority,
                 assignee=assignee,
                 reporter=reporter,
-                status=status,
+                status_id=resolve_status_id_or_default(status),
                 story_points=_to_decimal(story_points),
                 created_date=created_date,
                 updated_date=updated_date,
@@ -308,7 +309,7 @@ class JiraStoryRepository:
             story.priority = priority
             story.assignee = assignee
             story.reporter = reporter
-            story.status = status
+            story.status_id = resolve_status_id_or_default(status)
             story.story_points = _to_decimal(story_points)
             story.created_date = created_date
             story.updated_date = updated_date

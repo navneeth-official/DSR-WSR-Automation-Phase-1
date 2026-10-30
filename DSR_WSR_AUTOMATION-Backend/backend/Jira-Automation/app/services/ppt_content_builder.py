@@ -49,8 +49,8 @@ def _sprint_status_label(db_status: str | None) -> str:
     return db_status.strip()
 
 
-def _bucket_story(status: str) -> str:
-    return STATUS_TO_BUCKET.get(status.strip().lower(), "completed")
+def _bucket_story(status: str | None) -> str:
+    return STATUS_TO_BUCKET.get((status or "").strip().lower(), "completed")
 
 
 def key_activities_from_inprogress(sections: list[dict[str, Any]]) -> list[str]:

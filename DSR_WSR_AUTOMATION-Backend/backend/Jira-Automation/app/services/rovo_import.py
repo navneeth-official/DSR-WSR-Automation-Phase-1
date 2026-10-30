@@ -55,9 +55,9 @@ def _parse_date(value: str | None) -> date | None:
     return parse_flexible_date(value)
 
 
-def _infer_completion(status: str) -> Decimal | None:
+def _infer_completion(status: str | None) -> Decimal | None:
     """Rovo does not send completion %; infer a default from status."""
-    normalized = status.strip().lower()
+    normalized = (status or "").strip().lower()
     if normalized in {"done", "closed", "resolved"}:
         return Decimal("100")
     if normalized in {"in progress", "in review", "in development"}:
@@ -65,5 +65,5 @@ def _infer_completion(status: str) -> Decimal | None:
     return Decimal("0")
 
 
-def infer_completion(status: str) -> Decimal | None:
+def infer_completion(status: str | None) -> Decimal | None:
     return _infer_completion(status)

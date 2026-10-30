@@ -2,9 +2,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.constants.story_status import resolve_status_id_or_default, status_name
 from app.database import Base
 
 if TYPE_CHECKING:
@@ -40,7 +41,13 @@ class JiraStory(Base):
         Numeric(5, 2),
         nullable=True,
     )
-    status: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    status_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("story_statuses.status_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+        comment="FK to story_statuses lookup (To Do, In Progress, In Review, Done, Blocked)",
+    )
     assignee: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     reporter: Mapped[str | None] = mapped_column(String(200), nullable=True)
     issue_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -72,6 +79,15 @@ class JiraStory(Base):
 
     project: Mapped["Project"] = relationship(back_populates="stories")
     sprint: Mapped["Sprint | None"] = relationship(back_populates="stories")
+
+    @property
+    def status(self) -> str:
+        """Display name of the story status (derived from ``status_id``)."""
+        return status_name(self.status_id)
+
+    @status.setter
+    def status(self, value: "str | int | None") -> None:
+        self.status_id = resolve_status_id_or_default(value)
 
     def __repr__(self) -> str:
         return (

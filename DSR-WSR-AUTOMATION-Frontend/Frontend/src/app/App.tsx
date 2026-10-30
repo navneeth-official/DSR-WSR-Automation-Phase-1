@@ -112,13 +112,17 @@ const SAMPLE_DATA = [
 
 type JiraIssue = (typeof SAMPLE_DATA)[0] & { reportee?: string; date_assigned?: string };
 
-type StoryStatus = "To Do" | "In Progress" | "Done";
+type StoryStatus = "To Do" | "In Progress" | "In Review" | "Done" | "Blocked";
 
-function normalizeStatus(status: string | undefined | null): StoryStatus {
-  const s = (status ?? "").trim().toLowerCase();
+/** Maps a raw status to a known story status, or null when it has no mapping. */
+function normalizeStatus(status: string | undefined | null): StoryStatus | null {
+  const s = String(status ?? "").trim().toLowerCase().replace(/[\s_-]+/g, " ");
   if (s === "done" || s === "closed" || s === "resolved" || s === "complete" || s === "completed") return "Done";
   if (s === "in progress" || s === "inprogress" || s === "wip" || s === "active") return "In Progress";
-  return "To Do";
+  if (s === "in review" || s === "inreview" || s === "review") return "In Review";
+  if (s === "blocked" || s === "on hold") return "Blocked";
+  if (s === "to do" || s === "todo" || s === "open" || s === "backlog" || s === "new") return "To Do";
+  return null;
 }
 
 function parseIsoDate(s: string): Date | null {
@@ -823,9 +827,21 @@ function weekId(weekStart: string): string {
 
 function StatusBadge({ status }: { status: string }) {
   const normalized = normalizeStatus(status);
+  if (!normalized) {
+    return (
+      <span
+        title="Status not mapped - choose a status"
+        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200"
+      >
+        Select status *
+      </span>
+    );
+  }
   const map: Record<StoryStatus, string> = {
     Done: "bg-green-100 text-green-700 border border-green-200",
     "In Progress": "bg-blue-100 text-blue-700 border border-blue-200",
+    "In Review": "bg-purple-100 text-purple-700 border border-purple-200",
+    Blocked: "bg-red-100 text-red-700 border border-red-200",
     "To Do": "bg-gray-100 text-gray-600 border border-gray-200",
   };
   return (
@@ -1041,16 +1057,37 @@ function DsrEditableStatus({
   value: string;
   onSave: (v: string) => void;
 }) {
+  const normalized = normalizeStatus(value);
+  const unmapped = normalized === null;
   return (
+    <div className="relative inline-block">
+      {unmapped && (
+        <span
+          className="absolute -top-2.5 left-1 text-red-600 font-bold text-sm leading-none pointer-events-none"
+          title="Status not mapped - please choose one"
+        >
+          *
+        </span>
+      )}
     <select
-      value={normalizeStatus(value)}
+      value={normalized ?? ""}
       onChange={(e) => onSave(e.target.value)}
-      className="px-2 py-1 border border-gray-200 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-red/30"
+      className={`px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-red/30 ${
+        unmapped ? "border-red-300" : "border-gray-200"
+      }`}
     >
+      {unmapped && (
+        <option value="" disabled>
+          Select status
+        </option>
+      )}
       <option value="To Do">To Do</option>
       <option value="In Progress">In Progress</option>
+      <option value="In Review">In Review</option>
       <option value="Done">Done</option>
+      <option value="Blocked">Blocked</option>
     </select>
+    </div>
   );
 }
 
@@ -1197,6 +1234,9 @@ function DSREntryPage({
       (r.story_points != null && String(r.story_points).includes(q))
     );
   });
+
+  // Stories whose status from the intake JSON can't be mapped to a known story status.
+  const unmappedCount = parsedRows.filter((r) => normalizeStatus(r.status) === null).length;
 
   const toggleRow = (i: number) => {
     const s = new Set(selectedRows);
@@ -1493,6 +1533,22 @@ function DSREntryPage({
             </div>
           </div>
 
+          {unmappedCount > 0 && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 px-6 py-2.5 bg-red-50 border-b border-red-200 text-xs text-red-700"
+            >
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>
+                <strong>
+                  {unmappedCount} {unmappedCount === 1 ? "story has" : "stories have"} a status that cannot be mapped.
+                </strong>{" "}
+                Select a valid status (To Do, In Progress, In Review, Done or Blocked) from the dropdown on each
+                highlighted row before generating the report.
+              </span>
+            </div>
+          )}
+
           {/* Table */}
           <div className="flex-1 overflow-auto">
             <table className="w-full text-xs border-collapse">
@@ -1528,7 +1584,13 @@ function DSREntryPage({
                 {filtered.map((row, i) => (
                   <tr
                     key={i}
-                    className={`border-b border-gray-100 hover:bg-brand-red/10/30 ${selectedRows.has(i) ? "bg-brand-red/10" : ""}`}
+                    className={`border-b border-gray-100 hover:bg-brand-red/10/30 ${
+                      normalizeStatus(row.status) === null
+                        ? "bg-red-50 outline outline-1 -outline-offset-1 outline-red-300"
+                        : selectedRows.has(i)
+                          ? "bg-brand-red/10"
+                          : ""
+                    }`}
                   >
                     <td className="px-3 py-2">
                       <input
@@ -1548,10 +1610,19 @@ function DSREntryPage({
                         editCell?.col === c.key;
                       if (c.key === "status")
                         return (
-                          <td key={c.key} className="px-3 py-2">
-                            <StatusBadge
-                              status={String(val ?? "")}
+                          <td key={c.key} className="px-3 py-2 whitespace-nowrap">
+                            <DsrEditableStatus
+                              value={String(val ?? "")}
+                              onSave={(v) => updateCell(i, "status", v)}
                             />
+                            {normalizeStatus(row.status) === null && (
+                              <div
+                                className="mt-1 text-[11px] text-red-600 max-w-[10rem] truncate"
+                                title={`"${String(val ?? "").trim() || "(empty)"}" cannot be mapped to a story status`}
+                              >
+                                "{String(val ?? "").trim() || "(empty)"}" is not a valid status
+                              </div>
+                            )}
                           </td>
                         );
                       if (c.key === "issue_type")
@@ -1713,9 +1784,16 @@ function DSREntryPage({
               <span className="text-xs text-gray-400">
                 {parsedRows.length} rows parsed
               </span>
+              {unmappedCount > 0 ? (
+                <span className="text-xs text-red-600 font-medium">
+                  Fix {unmappedCount} unmapped {unmappedCount === 1 ? "status" : "statuses"} to continue
+                </span>
+              ) : null}
               <button
-                disabled={importing || parsedRows.length === 0}
+                disabled={importing || parsedRows.length === 0 || unmappedCount > 0}
+                title={unmappedCount > 0 ? "Select a valid status for the highlighted rows first" : undefined}
                 onClick={async () => {
+                  if (unmappedCount > 0) return;
                   setImporting(true);
                   setImportError("");
                   try {
@@ -1904,7 +1982,7 @@ function SavedTicketsPage({
   }));
 
   const totalDone = filtered.filter((d) => normalizeStatus(d.status) === "Done").length;
-  const totalInProgress = filtered.filter((d) => normalizeStatus(d.status) === "In Progress").length;
+  const totalInProgress = filtered.filter((d) => ["In Progress", "In Review"].includes(normalizeStatus(d.status))).length;
   const totalTodo = filtered.filter((d) => normalizeStatus(d.status) === "To Do").length;
   const overallPct = statusCompletionPct(filtered as JiraIssue[]);
 
@@ -2858,7 +2936,7 @@ function GenerateWSRPage() {
 function completionPct(status: string): number {
   const s = normalizeStatus(status);
   if (s === "Done") return 100;
-  if (s === "In Progress") return 50;
+  if (s === "In Progress" || s === "In Review") return 50;
   return 0;
 }
 
@@ -3276,7 +3354,7 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
 
   const overallPct = statusCompletionPct(displayRows);
   const doneCount = displayRows.filter((r) => normalizeStatus(r.status) === "Done").length;
-  const inProgressCount = displayRows.filter((r) => normalizeStatus(r.status) === "In Progress").length;
+  const inProgressCount = displayRows.filter((r) => ["In Progress", "In Review"].includes(normalizeStatus(r.status))).length;
   const todoCount = displayRows.filter((r) => normalizeStatus(r.status) === "To Do").length;
 
   const patchDsrRow = useCallback((record: JiraStoryRecord) => {

@@ -2,8 +2,9 @@ from datetime import date
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
+from app.constants.story_status import STORY_STATUSES, resolve_status_id
 from app.utils.date_parse import parse_flexible_date
 
 FlexibleDate = Annotated[date | None, BeforeValidator(parse_flexible_date)]
@@ -19,7 +20,9 @@ class JiraStorySaveRequest(BaseModel):
     sprint_start_date: FlexibleDate = None
     sprint_end_date: FlexibleDate = None
     date_assigned: FlexibleDate = Field(default=None, description="Date Assigned")
-    status: str = Field(description="Status")
+    status: str = Field(
+        description="Status; must map to a story_statuses name (To Do, In Progress, In Review, Done, Blocked)"
+    )
     story_points: Decimal | None = Field(default=None, description="Story Points")
     percent_complete: Decimal | None = Field(
         default=None, ge=0, le=100, description="% Complete (0-100)"
@@ -37,6 +40,14 @@ class JiraStorySaveRequest(BaseModel):
     updated_date: FlexibleDate = None
     resolved_date: FlexibleDate = None
     snapshot_date: FlexibleDate = None
+
+    @field_validator("status")
+    @classmethod
+    def _status_must_be_mapped(cls, value: str) -> str:
+        if resolve_status_id(value) is None:
+            allowed = ", ".join(name for _, name in STORY_STATUSES)
+            raise ValueError(f"Status '{value}' cannot be mapped. Choose one of: {allowed}")
+        return value
 
 
 # POST /api/stories uses the same body shape.
