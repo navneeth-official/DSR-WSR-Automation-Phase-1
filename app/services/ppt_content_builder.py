@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.constants.ppt_mapping import (
     PPT_SLIDE_ORDER,
     PPT_SLIDE_TITLES,
-    STATUS_TO_BUCKET,
+    wsr_story_bucket,
 )
 from app.models.jira_story import JiraStory
 from app.repositories.jira_story_repository import JiraStoryRepository
@@ -28,10 +28,6 @@ def _sprint_status_label(db_status: str | None) -> str:
     if not db_status or not db_status.strip():
         return "In-progress"
     return db_status.strip()
-
-
-def _bucket_story(status: str) -> str:
-    return STATUS_TO_BUCKET.get(status.strip().lower(), "completed")
 
 
 def key_activities_from_inprogress(sections: list[dict[str, Any]]) -> list[str]:
@@ -82,7 +78,7 @@ def build_slide_chunks(
 
         for story in sorted(group_stories, key=lambda s: s.jira_key):
             title = (story.title or story.summary).strip()
-            bucket = _bucket_story(story.status)
+            bucket = wsr_story_bucket(story.status)
             if bucket == "released":
                 released.append(title)
             elif bucket == "inprogress":

@@ -7,18 +7,35 @@ Usage:
     python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --json-only
 
 Template: omit --template to use the newest .pptx in templates/ (or templates/wsr_template.pptx).
+
+Environment (see .env.example — CLI flags override .env when both are set):
+
+    WSR_REPORT_START_DATE=2026-04-16
+    WSR_REPORT_END_DATE=2026-06-15
+    WSR_PPT_ENGINE=v2
+    WSR_PPT_OUTPUT=output/HEB_Delivery_Status.pptx
+
+Minimal run when .env is configured:
+
+    python scripts/generate_ppt_content.py
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import date
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO_ROOT))
+
+from dotenv import load_dotenv
+
+load_dotenv(_REPO_ROOT / ".env")
 
 from app.database import SessionLocal
 from app.services.ppt_content_builder import build_ppt_content
@@ -38,6 +55,10 @@ from app.services.wsr_template import resolve_wsr_template
 DEFAULT_JSON = DEFAULT_CONTENT_JSON
 DEFAULT_PREVIEW = DEFAULT_CONTENT_PREVIEW
 DEFAULT_PPT = DEFAULT_PPT_OUTPUT
+
+
+def _env(name: str, default: str = "") -> str:
+    return os.environ.get(name, default).strip()
 
 
 def build_ppt_deck(
@@ -94,32 +115,32 @@ def main() -> None:
     parser.add_argument(
         "--start-date",
         type=str,
-        required=True,
-        help="WSR report period start (YYYY-MM-DD, inclusive).",
+        default=_env("WSR_REPORT_START_DATE"),
+        help="WSR report period start (YYYY-MM-DD). Default: WSR_REPORT_START_DATE in .env",
     )
     parser.add_argument(
         "--end-date",
         type=str,
-        required=True,
-        help="WSR report period end (YYYY-MM-DD, inclusive).",
+        default=_env("WSR_REPORT_END_DATE"),
+        help="WSR report period end (YYYY-MM-DD). Default: WSR_REPORT_END_DATE in .env",
     )
     parser.add_argument(
         "--output",
         type=str,
-        default=str(DEFAULT_JSON),
-        help=f"Output JSON path (default: {DEFAULT_JSON.name})",
+        default=_env("WSR_CONTENT_JSON") or str(DEFAULT_JSON),
+        help=f"Output JSON path (default: WSR_CONTENT_JSON or {DEFAULT_JSON.name})",
     )
     parser.add_argument(
         "--preview",
         type=str,
-        default=str(DEFAULT_PREVIEW),
-        help=f"Human-readable preview file (default: {DEFAULT_PREVIEW.name})",
+        default=_env("WSR_CONTENT_PREVIEW") or str(DEFAULT_PREVIEW),
+        help=f"Preview file (default: WSR_CONTENT_PREVIEW or {DEFAULT_PREVIEW.name})",
     )
     parser.add_argument(
         "--ppt-output",
         type=str,
-        default=str(DEFAULT_PPT),
-        help=f"Output PowerPoint path (default: {DEFAULT_PPT.name})",
+        default=_env("WSR_PPT_OUTPUT") or str(DEFAULT_PPT),
+        help=f"Output PowerPoint path (default: WSR_PPT_OUTPUT or {DEFAULT_PPT.name})",
     )
     parser.add_argument(
         "--template",
@@ -134,8 +155,8 @@ def main() -> None:
         "--engine",
         type=str,
         choices=("v1", "v2"),
-        default="v2",
-        help="Deck builder: v1=legacy update_delivery_status.py, v2=template-agnostic engine",
+        default=_env("WSR_PPT_ENGINE") or "v2",
+        help="Deck builder (default: WSR_PPT_ENGINE in .env, else v2)",
     )
     parser.add_argument(
         "--save-titles",
@@ -155,7 +176,7 @@ def main() -> None:
     parser.add_argument(
         "--json-only",
         action="store_true",
-        help="Only write JSON + preview; do not build PowerPoint",
+        help="Only write JSON + preview; do not build PowerPoint (or WSR_JSON_ONLY=true in .env)",
     )
     parser.add_argument(
         "--auto-fix",
@@ -201,6 +222,17 @@ def main() -> None:
         help="Use legacy pixel-measurement vision loop instead of hybrid (default)",
     )
     args = parser.parse_args()
+
+    if not args.start_date or not args.end_date:
+        print(
+            "Error: report period required. Set WSR_REPORT_START_DATE and "
+            "WSR_REPORT_END_DATE in .env, or pass --start-date and --end-date.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    if not args.json_only and _env("WSR_JSON_ONLY").lower() in ("1", "true", "yes"):
+        args.json_only = True
 
     start_date = date.fromisoformat(args.start_date)
     end_date = date.fromisoformat(args.end_date)
