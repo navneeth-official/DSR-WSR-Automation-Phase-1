@@ -14,7 +14,7 @@ def _normalize_section(section: dict) -> SprintSection:
     return SprintSection(
         sprint_name=section["sprint_name"],
         sprint_dates=dates,
-        sprint_status=section.get("sprint_status", "In-progress"),
+        sprint_status=(section.get("sprint_status") or "").strip(),
         completed=list(section.get("completed", [])),
         released=list(section.get("released", [])),
         inprogress=list(section.get("inprogress", [])),

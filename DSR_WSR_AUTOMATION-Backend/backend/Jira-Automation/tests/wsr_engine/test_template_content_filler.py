@@ -369,6 +369,58 @@ def test_fill_bucket_specific_story_tokens_any_order() -> None:
     assert "1" in joined
 
 
+def test_sample_story_rows_are_replaced_and_sprint_counts_stay_distinct() -> None:
+    cell = _cell_with_paragraphs([
+        (
+            "Sprint – { Sprint Name }, { Status }({ From Date } – { To Date }) "
+            "Stories (Total – { Count }, Completed –{ Count }, In-review –{ Count }, In-progress – { Count })",
+            0,
+            "",
+        ),
+        ("Current week sprint status", 0, ""),
+        ("Stories completed this week – { Count } stories", 7, ""),
+        ("Negotiate same day effective COGS contract", 1, ""),
+        ("Stories released for partner review – { Count } stories", 7, ""),
+        ("Expose multiple-item DSD ledger endpoint", 1, ""),
+        ("Mark unused endpoints deprecated", 1, ""),
+        ("Stories in-progress this week – { Count } stories", 7, ""),
+        ("Fix Confluence publisher", 1, ""),
+        ("Finalize cash discount logic", 1, ""),
+    ])
+    spec = extract_block_spec_from_cell(cell)
+    assert [row.role for row in spec.ordered_paragraphs].count("story_bullet") == 3
+    assert [row.role for row in spec.ordered_paragraphs].count("story_sample") == 2
+
+    out = _cell_with_paragraphs([])
+    fill_highlights_cell(
+        out,
+        spec,
+        [{
+            "sprint_name": "Q3.01 FY26 Phoenix",
+            "sprint_status": "inprogress",
+            "sprint_dates": "Jun 01 – Jun 15",
+            "completed": [],
+            "released": [],
+            "inprogress": ["Add push notification for new weekly schedule publication on mobile app"],
+        }],
+    )
+    texts = [paragraph_plain_text(p) for p in out.text_frame._txBody.findall(qn("a:p"))]
+    joined = "\n".join(texts)
+    assert "Total – 1" in texts[0]
+    assert "Completed –0" in texts[0]
+    assert "In-review –0" in texts[0]
+    assert "In-progress – 1" in texts[0]
+    assert "Q3.01 FY26 Phoenix" in texts[0]
+    assert "Jun 01" in texts[0] and "Jun 15" in texts[0]
+    assert "{ Count }" not in joined
+    assert "completed this week" not in joined.lower()
+    assert "partner review" not in joined.lower()
+    assert "Negotiate same day" not in joined
+    assert "Fix Confluence publisher" not in joined
+    assert "Add push notification" in joined
+    assert any("in-progress this week" in text.lower() and "1" in text for text in texts)
+
+
 def test_empty_bucket_omitted() -> None:
     ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
     sprint_p = parse_xml(f'<a:p xmlns:a="{ns}"><a:r><a:t>{{Sprint Name}}</a:t></a:r></a:p>')

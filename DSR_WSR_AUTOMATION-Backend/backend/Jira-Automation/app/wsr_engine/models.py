@@ -62,6 +62,12 @@ class SprintSection:
                 f"Done \u2013 {len(self.completed)}, In-review \u2013 {len(self.released)}, "
                 f"In-progress \u2013 {len(self.inprogress)})"
             ),
+            "sprint_name": self.sprint_name,
+            "sprint_status": self.sprint_status,
+            "sprint_dates": self.sprint_dates,
+            "completed": list(self.completed),
+            "released": list(self.released),
+            "inprogress": list(self.inprogress),
             "completed_count": str(len(self.completed)),
             "completed_items": self.completed,
             "released_count": str(len(self.released)),
@@ -135,6 +141,8 @@ class BuildReport:
     output_path: str = ""
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # e.g. "HL pipeline [Cost] main: PLACEHOLDER_FILL (...)"
+    pipeline_choices: list[str] = field(default_factory=list)
 
     def summary_lines(self) -> list[str]:
         lines = [
@@ -148,6 +156,9 @@ class BuildReport:
             lines.append(f"Created {self.continuations_created} continuation slide(s)")
         if self.index_entries_updated:
             lines.append(f"Updated {self.index_entries_updated} index entries")
+        if self.pipeline_choices:
+            lines.append("Pipeline choices:")
+            lines.extend(f"  {c}" for c in self.pipeline_choices)
         if self.output_path:
             lines.append(f"Saved: {self.output_path}")
         for w in self.warnings:

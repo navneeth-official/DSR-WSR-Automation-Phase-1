@@ -28,6 +28,15 @@ def test_find_placeholder_tokens() -> None:
     assert tokens == ["Status", "Sprint Name", "To Date", "From Date"]
 
 
+def test_status_is_written_as_calculated() -> None:
+    ctx = PlaceholderContext(status="In Progress")
+    assert substitute_text("{ Status }", ctx) == "In Progress"
+    assert substitute_text("{ status }", ctx) == "In Progress"
+    assert substitute_text("{ STATUS }", ctx) == "In Progress"
+    assert substitute_text("{ Status }", PlaceholderContext(status="Ended")) == "Ended"
+    assert substitute_text("Sprint, { Status }(", PlaceholderContext(status="")) == "Sprint, ("
+
+
 def test_substitute_text_respects_template_order() -> None:
     ctx = PlaceholderContext(
         sprint_name="Sprint 42",

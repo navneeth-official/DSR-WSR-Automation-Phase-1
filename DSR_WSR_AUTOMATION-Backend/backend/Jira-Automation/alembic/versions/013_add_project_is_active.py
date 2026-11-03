@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import inspect
 
 revision: str = "013_add_project_is_active"
 down_revision: Union[str, None] = "012_employee_assignments_view"
@@ -17,6 +18,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    cols = {col["name"] for col in inspect(bind).get_columns("projects")}
+    if "is_active" in cols:
+        return
     op.add_column(
         "projects",
         sa.Column("is_active", sa.Boolean(), server_default=sa.text("true"), nullable=False),

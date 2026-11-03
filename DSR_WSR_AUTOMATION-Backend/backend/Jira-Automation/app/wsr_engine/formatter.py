@@ -309,43 +309,79 @@ def _pick_para(paras: list, idx: int | None, fallback: int = 0):
     return paras[min(fallback, len(paras) - 1)]
 
 
-def section_templates_from_profile(layout_slide, service: ServiceProfile) -> dict[str, Any]:
-    """Deep-copy paragraph templates from the service reference slide."""
+def section_templates_from_profile(
+    layout_slide,
+    service: ServiceProfile,
+    fallback_templates: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Deep-copy paragraph templates from a service slide, with canonical fallbacks.
+
+    Some legacy service slides omit one or more Highlights lines, or use a
+    different sentence in place of the sprint/current-week lines.  Reusing an
+    unrelated paragraph by positional index makes an empty category appear as
+    real content.  Use the canonical service template for any missing role.
+    """
     hl = get_highlights_shape(layout_slide)
     cell = hl.table.cell(service.hl_content_row, service.hl_content_col)
     paras = cell.text_frame._txBody.findall(qn("a:p"))
     roles = service.paragraph_roles
 
-    story_para = _find_canonical_story_bullet(paras)
-    if story_para is None:
-        story_para = _pick_para(paras, roles.completed_bullet, 0)
+    def paragraph_at(index: int | None):
+        if index is None or not 0 <= index < len(paras):
+            return None
+        return paras[index]
 
-    def hdr(key: str) -> Any:
-        idx = getattr(roles, f"{key}_hdr")
-        return copy.deepcopy(_pick_para(paras, idx, roles.completed_hdr or 2))
+    def fallback(key: str):
+        value = (fallback_templates or {}).get(key)
+        return copy.deepcopy(value) if value is not None else None
 
-    def bullet(key: str) -> Any:
-        idx = getattr(roles, f"{key}_bullet")
-        hdr_idx = getattr(roles, f"{key}_hdr")
-        story = _story_after_header(paras, hdr_idx)
-        if story is not None:
-            return copy.deepcopy(story)
-        if idx is not None and 0 <= idx < len(paras):
-            candidate = paras[idx]
-            if _is_story_bullet(candidate):
-                return copy.deepcopy(candidate)
-        return copy.deepcopy(story_para)
+    def category_header(key: str):
+        candidate = paragraph_at(getattr(roles, f"{key}_hdr"))
+        patterns = {
+            "completed": ("completed this week",),
+            "released": ("released for partner", "released for partner review"),
+            "inprogress": ("in-progress this week", "in progress this week"),
+        }[key]
+        if candidate is not None and _find_para_index([candidate], *patterns) == 0:
+            return copy.deepcopy(candidate)
+        return fallback(f"{key}_hdr")
 
-    return {
-        "sprint": copy.deepcopy(_pick_para(paras, roles.sprint, 0)),
-        "current_week": copy.deepcopy(_pick_para(paras, roles.current_week, 1)),
-        "completed_hdr": hdr("completed"),
-        "completed_bullet": bullet("completed"),
-        "released_hdr": hdr("released"),
-        "released_bullet": bullet("released"),
-        "inprogress_hdr": hdr("inprogress"),
-        "inprogress_bullet": bullet("inprogress"),
+    def category_bullet(key: str):
+        header_index = getattr(roles, f"{key}_hdr")
+        candidate = _story_after_header(paras, header_index)
+        if candidate is None:
+            candidate = paragraph_at(getattr(roles, f"{key}_bullet"))
+        if candidate is not None and _is_story_bullet(candidate):
+            return copy.deepcopy(candidate)
+        return fallback(f"{key}_bullet")
+
+    sprint = paragraph_at(roles.sprint)
+    if sprint is None or _find_sprint_para_index([sprint]) != 0:
+        sprint = fallback("sprint")
+    else:
+        sprint = copy.deepcopy(sprint)
+
+    current_week = paragraph_at(roles.current_week)
+    if current_week is None or "current week sprint status" not in _normalize_match_text(
+        paragraph_text(current_week)
+    ):
+        current_week = fallback("current_week")
+    else:
+        current_week = copy.deepcopy(current_week)
+
+    result = {
+        "sprint": sprint,
+        "current_week": current_week,
+        "completed_hdr": category_header("completed"),
+        "completed_bullet": category_bullet("completed"),
+        "released_hdr": category_header("released"),
+        "released_bullet": category_bullet("released"),
+        "inprogress_hdr": category_header("inprogress"),
+        "inprogress_bullet": category_bullet("inprogress"),
     }
+    if any(value is None for value in result.values()):
+        raise RuntimeError("Could not resolve highlights section templates from template")
+    return result
 
 
 def set_two_run_header(p_elem, prefix: str, count_suffix: str) -> None:
@@ -767,6 +803,10 @@ def fill_highlights_on_slide(
     section_tmpl: dict,
     sections: list[dict],
 ) -> None:
+    from app.services.template_content_filler import fill_slide_highlights_if_placeholder
+
+    if fill_slide_highlights_if_placeholder(slide, sections):
+        return
     cell = highlights_content_cell(slide)
     populate_highlights_cell(cell, section_tmpl, {"sections": sections})
 

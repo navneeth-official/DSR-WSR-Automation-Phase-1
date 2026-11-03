@@ -35,3 +35,26 @@ def test_load_content_from_json(tmp_path: Path):
     content = load_content(path)
     assert len(content.projects) == 1
     assert content.projects[0].sections[0].completed == ["Story A"]
+
+
+def test_missing_sprint_status_stays_blank(tmp_path: Path):
+    data = {
+        "slides": [
+            {
+                "title": "Cost Core Service",
+                "sections": [
+                    {
+                        "sprint_name": "Q3.01",
+                        "sprint_dates": "Jun 04 – Jun 17",
+                        "completed": [],
+                        "released": [],
+                        "inprogress": [],
+                    }
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "content.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    content = load_content(path)
+    assert content.projects[0].sections[0].sprint_status == ""

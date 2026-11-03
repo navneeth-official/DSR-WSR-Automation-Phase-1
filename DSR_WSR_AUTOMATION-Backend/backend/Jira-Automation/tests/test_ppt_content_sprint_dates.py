@@ -10,7 +10,10 @@ from app.services.ppt_content_builder import (
     group_chunks_by_slide_title,
     key_activities_from_inprogress,
 )
-from app.services.sprint_display import sprint_dates_from_section
+from app.services.sprint_display import sprint_dates_from_section, sprint_status_for_wsr
+
+WSR_START = date(2026, 6, 11)
+WSR_END = date(2026, 6, 17)
 
 
 def _story(
@@ -50,7 +53,7 @@ def test_build_slide_chunks_uses_full_db_dates_not_wsr_end():
         sprint_start=date(2026, 6, 4),
         sprint_end=date(2026, 6, 17),
     )
-    chunk = build_slide_chunks([story])[0]
+    chunk = build_slide_chunks([story], wsr_start=WSR_START, wsr_end=WSR_END)[0]
     assert chunk["sprint_start_date"] == "2026-06-04"
     assert chunk["sprint_end_date"] == "2026-06-17"
     assert chunk["sprint_dates"] == "Jun 04 – Jun 17"
@@ -73,7 +76,7 @@ def test_build_slide_chunks_multiple_sprints_each_keep_db_dates():
     orion.sprint_id = 4
     orion.project_id = 1
 
-    chunks = build_slide_chunks([atlas, orion])
+    chunks = build_slide_chunks([atlas, orion], wsr_start=WSR_START, wsr_end=WSR_END)
     by_name = {c["sprint_name"]: c for c in chunks}
     assert by_name["Q3.01 FY26 Atlas"]["sprint_dates"] == "Jun 04 – Jun 17"
     assert by_name["Q3.02 FY26 Orion"]["sprint_dates"] == "Jun 18 – Jul 01"
@@ -116,6 +119,52 @@ def test_key_activities_from_inprogress_empty_when_no_stories():
     assert key_activities_from_inprogress([{"inprogress": []}]) == []
 
 
+def test_only_done_counts_as_completed_and_other_statuses_are_omitted():
+    def story(key: str, status: str):
+        item = _story(
+            jira_key=key,
+            sprint_name="Q3.01 FY26 Atlas",
+            sprint_start=date(2026, 6, 4),
+            sprint_end=date(2026, 6, 17),
+        )
+        item.status = status
+        item.title = key
+        return item
+
+    chunk = build_slide_chunks(
+        [
+            story("A", "Done"),
+            story("B", "DONE"),
+            story("C", "To Do"),
+            story("D", "Blocked"),
+            story("E", "In Progress"),
+            story("F", "IN REVIEW"),
+            story("G", "Closed"),
+        ],
+        wsr_start=WSR_START,
+        wsr_end=WSR_END,
+    )[0]
+    assert chunk["completed"] == ["A", "B"]
+    assert chunk["inprogress"] == ["E"]
+    assert chunk["released"] == ["F"]
+
+
+def test_sprint_status_is_calculated_from_wsr_dates_not_the_column():
+    story = _story(
+        jira_key="COST-1",
+        sprint_name="Q3.01 FY26 Atlas",
+        sprint_start=date(2026, 6, 4),
+        sprint_end=date(2026, 6, 17),
+        sprint_status="inprogress",
+    )
+    chunk = build_slide_chunks([story], wsr_start=WSR_START, wsr_end=WSR_END)[0]
+    assert chunk["sprint_status"] == "Ended"
+
+    assert sprint_status_for_wsr(date(2026, 6, 17), date(2026, 6, 17), WSR_START, WSR_END) == "In Progress"
+    assert sprint_status_for_wsr(date(2026, 6, 1), date(2026, 6, 30), WSR_START, WSR_END) == "In Progress"
+    assert sprint_status_for_wsr(date(2026, 6, 12), date(2026, 6, 30), WSR_START, WSR_END) == "In Progress"
+
+
 def test_build_slide_chunks_populates_key_activities_from_inprogress():
     story = _story(
         jira_key="COST-99",
@@ -126,7 +175,7 @@ def test_build_slide_chunks_populates_key_activities_from_inprogress():
     story.status = "In Progress"
     story.title = "Implement COGS adjustment API"
 
-    chunk = build_slide_chunks([story])[0]
+    chunk = build_slide_chunks([story], wsr_start=WSR_START, wsr_end=WSR_END)[0]
     assert chunk["inprogress"] == ["Implement COGS adjustment API"]
     assert chunk["key_activities"] == ["Implement COGS adjustment API"]
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from app.wsr_engine.models import TemplateModel
+from app.wsr_engine.models import ProjectMap, TemplateModel
 
 _PLACEHOLDER_PATTERNS = (
     r"\{[^}]+\}",
@@ -34,3 +34,17 @@ def is_skeleton_template(model: TemplateModel) -> bool:
     if len(model.projects) == 1 and is_placeholder_name(model.projects[0].project_name):
         return True
     return len(real_projects) == 0 and len(model.projects) <= 1
+
+
+def placeholder_prototype(model: TemplateModel) -> ProjectMap:
+    """Return the one sample delivery slide that carries the placeholder title."""
+    prototypes = [project for project in model.projects if is_placeholder_name(project.project_name)]
+    if len(prototypes) == 1:
+        return prototypes[0]
+    if not prototypes:
+        raise ValueError(
+            "The WSR template must contain one sample delivery slide with a placeholder "
+            "title, such as 'Delivery status – {Track Name}'. Named project slides are not filled."
+        )
+    names = ", ".join(project.project_name for project in prototypes)
+    raise ValueError(f"The WSR template has more than one placeholder sample slide: {names}.")

@@ -7,12 +7,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.paths import G10X_TEMPLATE, REPO_ROOT, TEMPLATES_DIR
+from app.paths import REPO_ROOT, TEMPLATES_DIR
 
 load_dotenv(REPO_ROOT / ".env")
-
-WSR_TEMPLATE_FILENAME = "wsr_template.pptx"
-LEGACY_G10X_TEMPLATE_NAME = G10X_TEMPLATE.name
 
 _active_template: Path | None = None
 
@@ -30,21 +27,18 @@ def list_templates_folder_pptx() -> list[Path]:
 
 
 def resolve_default_wsr_template() -> Path:
-    """Pick template: wsr_template.pptx, else newest file in templates/, else legacy default."""
-    primary = TEMPLATES_DIR / WSR_TEMPLATE_FILENAME
-    if primary.is_file():
-        return primary.resolve()
-
+    """Use the single placeholder template in ``templates/``, whatever its file name is."""
     folder_templates = list_templates_folder_pptx()
-    if folder_templates:
+    if len(folder_templates) == 1:
         return folder_templates[0]
-
-    if G10X_TEMPLATE.is_file():
-        return G10X_TEMPLATE.resolve()
-
+    if not folder_templates:
+        raise FileNotFoundError(
+            f"No WSR template found. Put the placeholder .pptx in {TEMPLATES_DIR}."
+        )
+    names = ", ".join(path.name for path in folder_templates)
     raise FileNotFoundError(
-        f"No WSR template found. Drop a .pptx into {TEMPLATES_DIR} "
-        f"or name one {WSR_TEMPLATE_FILENAME}"
+        f"{TEMPLATES_DIR} contains more than one PowerPoint file ({names}). "
+        "Leave only the placeholder template in that folder."
     )
 
 

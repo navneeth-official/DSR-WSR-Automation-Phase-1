@@ -14,7 +14,7 @@ def _sprint_line(section: dict[str, Any]) -> str:
         + len(section["inprogress"])
         + len(section["completed"])
     )
-    status = section.get("sprint_status", "In-progress")
+    status = section.get("sprint_status") or ""
     sprint_dates = sprint_dates_from_section(section)
     return (
         f"Sprint – {section['sprint_name']}, {status} "
@@ -41,7 +41,7 @@ def _slide_sections(slide: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "sprint_name": slide["sprint_name"],
             "sprint_dates": slide["sprint_dates"],
-            "sprint_status": slide.get("sprint_status", "In-progress"),
+            "sprint_status": slide.get("sprint_status") or "",
             "released": slide.get("released", []),
             "inprogress": slide.get("inprogress", []),
             "completed": slide.get("completed", []),

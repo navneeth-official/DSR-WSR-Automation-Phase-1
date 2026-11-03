@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -27,10 +26,7 @@ from app.paths import (
     DEFAULT_CONTENT_JSON,
     DEFAULT_CONTENT_PREVIEW,
     DEFAULT_PPT_OUTPUT,
-    G10X_TEMPLATE,
     OUTPUT_DIR,
-    PPT_BUILDER,
-    REPO_ROOT,
     ensure_output_dir,
     evaluation_ai_report_paths,
     evaluation_report_paths,
@@ -47,45 +43,25 @@ def build_ppt_deck(
     ppt_output: Path,
     layout_hints: Path | None = None,
     template: Path | str | None = None,
-    engine: str = "v1",
 ) -> None:
-    """Build PowerPoint deck using v1 (legacy) or v2 (template-agnostic WSR engine)."""
+    """Build the deck by cloning the placeholder sample slide for every project."""
+    del layout_hints  # retained so older callers do not break; layout hints are unused
     ensure_output_dir()
 
-    if engine == "v2":
-        tpl = resolve_wsr_template(template)
-        from app.wsr_engine.main import WsrEngine
+    tpl = resolve_wsr_template(template)
+    from app.wsr_engine.main import WsrEngine
 
-        print(f"\n>> Building PowerPoint (WSR engine v2): {ppt_output}")
-        print(f"   Template: {tpl}")
-        report = WsrEngine().run(
-            template_path=tpl,
-            content_path=content_json,
-            output_path=ppt_output,
-        )
-        for line in report.summary_lines():
-            print(f"   {line}")
-        if report.errors:
-            raise RuntimeError(f"WSR engine errors: {report.errors}")
-        return
-
-    if not PPT_BUILDER.is_file():
-        raise FileNotFoundError(f"PPT builder not found: {PPT_BUILDER}")
-    if not G10X_TEMPLATE.is_file():
-        raise FileNotFoundError(f"G10X template not found: {G10X_TEMPLATE}")
-
-    cmd = [
-        sys.executable,
-        str(PPT_BUILDER),
-        "--content",
-        str(content_json.resolve()),
-        "--output",
-        str(ppt_output.resolve()),
-    ]
-    if layout_hints and layout_hints.is_file():
-        cmd.extend(["--layout-hints", str(layout_hints.resolve())])
-    print(f"\n>> Building PowerPoint: {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=str(REPO_ROOT), check=True)
+    print(f"\n>> Building PowerPoint from placeholder template: {ppt_output}")
+    print(f"   Template: {tpl}")
+    report = WsrEngine().run(
+        template_path=tpl,
+        content_path=content_json,
+        output_path=ppt_output,
+    )
+    for line in report.summary_lines():
+        print(f"   {line}")
+    if report.errors:
+        raise RuntimeError(f"WSR engine errors: {report.errors}")
 
 
 def main() -> None:
@@ -127,16 +103,9 @@ def main() -> None:
         type=str,
         default="",
         help=(
-            "WSR template .pptx (v2 engine). Default: templates/wsr_template.pptx, "
-            "else the newest .pptx in templates/"
+            "Placeholder template .pptx. Default: the single .pptx in templates/, "
+            "regardless of its file name."
         ),
-    )
-    parser.add_argument(
-        "--engine",
-        type=str,
-        choices=("v1", "v2"),
-        default="v2",
-        help="Deck builder: v1=legacy update_delivery_status.py, v2=template-agnostic engine",
     )
     parser.add_argument(
         "--save-titles",
@@ -320,7 +289,6 @@ def main() -> None:
                 json_path,
                 ppt_path,
                 template=args.template.strip() or None,
-                engine=args.engine,
             )
             print(f"\nBuilt -> {ppt_path.resolve()}")
 

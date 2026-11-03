@@ -18,19 +18,12 @@ from app.services.template_profile import clone_prototype_service_profile
 from app.wsr_engine.content_parser import load_content
 from app.wsr_engine.models import BuildReport, TitleFormat
 from app.wsr_engine.ppt_writer import PptWriter
-from app.wsr_engine.project_deletion import (
-    delete_unmatched_projects,
-    refresh_project_maps_after_deletion,
-)
-from app.wsr_engine.project_matcher import load_aliases, match_content_driven, match_projects
-from app.wsr_engine.slide_order import (
-    cleanup_orphan_contd_slides,
-    delete_unmatched_delivery_slides,
-    finalize_slide_order,
-)
+from app.wsr_engine.project_deletion import refresh_project_maps_after_deletion
+from app.wsr_engine.project_matcher import load_aliases, match_content_driven
+from app.wsr_engine.slide_order import cleanup_orphan_contd_slides, finalize_slide_order
 from app.wsr_engine.slide_provisioner import provision_project_slides
 from app.wsr_engine.template_analyzer import analyze_template
-from app.wsr_engine.template_mode import is_skeleton_template
+from app.wsr_engine.template_mode import placeholder_prototype
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +41,14 @@ class WsrEngine:
         template = analyze_template(template_path)
         content = load_content(content_path)
         aliases = load_aliases(aliases_path)
-        skeleton_mode = is_skeleton_template(template)
+        prototype = placeholder_prototype(template)
+        mode_msg = (
+            "Template mode: placeholder sample slide "
+            f"({prototype.project_name}) cloned for each project"
+        )
+        print(f"   {mode_msg}", flush=True)
+        logger.info(mode_msg)
+        report.pipeline_choices.append(mode_msg)
 
         out = Path(output_path)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -56,51 +56,33 @@ class WsrEngine:
         writer = PptWriter(template_path, working_path=out)
         writer.prepare(template)
 
-        if skeleton_mode:
-            title_format = template.title_format or TitleFormat(
-                prefix="Delivery status",
-                separator=" \u2013 ",
-                contd_marker="(Contd...)",
-            )
-            prototype = template.projects[0]
-            projects = provision_project_slides(
-                writer.prs,
-                prototype.main_slide_index,
-                content.projects,
-                title_format,
-                aliases,
-            )
-            template.projects = projects
-            template.profile = clone_prototype_service_profile(
-                template.profile,
-                prototype.project_name,
-                projects,
-            )
-            writer.template_model = template
+        title_format = template.title_format or TitleFormat(
+            prefix="Delivery status",
+            separator=" \u2013 ",
+            contd_marker="(Contd...)",
+        )
+        projects = provision_project_slides(
+            writer.prs,
+            prototype.main_slide_index,
+            content.projects,
+            title_format,
+            aliases,
+        )
+        template.projects = projects
+        template.profile = clone_prototype_service_profile(
+            template.profile,
+            prototype.project_name,
+            projects,
+        )
+        writer.template_model = template
 
-            matched = match_content_driven(projects, content.projects, aliases)
-            matched_names = set(matched.keys())
-            report.detected_projects = len(projects)
-            report.matched_projects = len(matched)
-            report.deleted_projects = 0
-            remaining_names = [p.project_name for p in projects if p.project_name in matched_names]
-            projects = [p for p in projects if p.project_name in matched_names]
-        else:
-            matched = match_projects(template, content.projects, aliases)
-            matched_names = set(matched.keys())
-            report.detected_projects = len(template.projects)
-            report.matched_projects = len(matched)
-
-            deleted = delete_unmatched_projects(writer.prs, template, matched_names)
-            deleted += delete_unmatched_delivery_slides(writer.prs, matched_names)
-            report.deleted_projects = len(template.projects) - len(matched_names)
-            if deleted:
-                logger.info("Deleted %d slide(s) for unmatched projects", deleted)
-
-            remaining_names = [
-                p.project_name for p in template.projects if p.project_name in matched_names
-            ]
-            projects = refresh_project_maps_after_deletion(writer.prs, remaining_names)
+        matched = match_content_driven(projects, content.projects, aliases)
+        matched_names = set(matched.keys())
+        report.detected_projects = len(projects)
+        report.matched_projects = len(matched)
+        report.deleted_projects = 0
+        remaining_names = [p.project_name for p in projects if p.project_name in matched_names]
+        projects = [p for p in projects if p.project_name in matched_names]
 
         content_labels = {
             name: matched[name].title for name in matched if name in matched_names
@@ -120,13 +102,11 @@ class WsrEngine:
 
         finalize_slide_order(writer.prs, remaining_names)
         cleanup_orphan_contd_slides(writer.prs)
-        if not skeleton_mode:
-            delete_unmatched_delivery_slides(writer.prs, matched_names)
 
         projects = refresh_project_maps_after_deletion(writer.prs, remaining_names)
         report.index_entries_updated = writer.update_index(
             projects,
-            skeleton_mode=skeleton_mode,
+            skeleton_mode=True,
             content_labels=content_labels,
         )
 
@@ -148,8 +128,6 @@ class WsrEngine:
                 logger.info("Synced header logos on %d delivery slide(s)", synced)
 
         normalize_slide_partnames(writer.prs)
-        if not skeleton_mode:
-            delete_unmatched_delivery_slides(writer.prs, matched_names)
 
         saved = writer.save(out)
         report.output_path = str(saved)

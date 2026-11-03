@@ -13,9 +13,10 @@ from app.constants.ppt_mapping import (
     PPT_SLIDE_TITLES,
     STATUS_TO_BUCKET,
 )
+from app.constants.story_status import normalize_status_text
 from app.models.jira_story import JiraStory
 from app.repositories.jira_story_repository import JiraStoryRepository
-from app.services.sprint_display import format_sprint_dates_for_display
+from app.services.sprint_display import format_sprint_dates_for_display, sprint_status_for_wsr
 
 
 def _ppt_story_line(story: JiraStory) -> str:
@@ -42,15 +43,9 @@ def ppt_slide_title(project_key: str, project_name: str) -> str:
     return PPT_SLIDE_TITLES.get(project_key, project_name)
 
 
-def _sprint_status_label(db_status: str | None) -> str:
-    """Use sprints.sprint_status as-is on the PPT sprint line (fallback when missing)."""
-    if not db_status or not db_status.strip():
-        return "In-progress"
-    return db_status.strip()
-
-
-def _bucket_story(status: str | None) -> str:
-    return STATUS_TO_BUCKET.get((status or "").strip().lower(), "completed")
+def _bucket_story(status: str | None) -> str | None:
+    """Map a story status to a slide bucket. Unknown statuses are omitted."""
+    return STATUS_TO_BUCKET.get(normalize_status_text(status))
 
 
 def key_activities_from_inprogress(sections: list[dict[str, Any]]) -> list[str]:
@@ -76,12 +71,16 @@ def _slide_order_key(project_key: str) -> tuple[int, str]:
 
 def build_slide_chunks(
     stories: list[JiraStory],
+    *,
+    wsr_start: date,
+    wsr_end: date,
 ) -> list[dict[str, Any]]:
     """
     Group stories by (project, sprint) and build one JSON chunk per group.
 
     Sprint line dates always come from ``sprints.sprint_start_date`` /
-    ``sprints.sprint_end_date`` (full DB values). WSR range is not used here.
+    ``sprints.sprint_end_date`` (full DB values). Sprint status is calculated
+    from those dates and this WSR window. ``sprints.sprint_status`` is not read.
     """
     groups: dict[tuple[int, int | None], list[JiraStory]] = defaultdict(list)
     for story in stories:
@@ -106,14 +105,14 @@ def build_slide_chunks(
                 released.append(title)
             elif bucket == "inprogress":
                 inprogress.append(title)
-            else:
+            elif bucket == "completed":
                 completed.append(title)
 
         sprint_name = sprint.sprint_name if sprint else "Current Sprint"
         sprint_start = sprint.sprint_start_date if sprint else None
         sprint_end = sprint.sprint_end_date if sprint else None
         sprint_dates = format_sprint_dates_for_display(sprint_start, sprint_end)
-        status_word = _sprint_status_label(sprint.sprint_status if sprint else None)
+        status_word = sprint_status_for_wsr(sprint_start, sprint_end, wsr_start, wsr_end)
 
         section_payload = {
             "sprint_name": sprint_name,
@@ -240,7 +239,7 @@ def build_ppt_content(
         titles_generated = 0
         titles_reused = titles_from_db
 
-    chunks = build_slide_chunks(stories)
+    chunks = build_slide_chunks(stories, wsr_start=start_date, wsr_end=end_date)
     if merge_titles:
         slides = merge_chunks_by_title(chunks)
     else:

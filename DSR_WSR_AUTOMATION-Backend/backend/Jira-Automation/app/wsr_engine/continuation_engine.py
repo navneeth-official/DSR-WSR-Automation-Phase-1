@@ -129,6 +129,7 @@ def ensure_continuation_slides(
     template_slide_idx: int,
     title_format: TitleFormat,
     section_tmpl: dict,
+    pipeline_choices: list[str] | None = None,
 ) -> tuple[list[int], int]:
     if not continuation_chains:
         return [], 0
@@ -167,7 +168,31 @@ def ensure_continuation_slides(
         ref_title = find_title_shape(main_slide)
         set_contd_title(contd_slide, project_name, ref_title, title_format)
 
-        fill_contd_highlights_on_slide(contd_slide, section_tmpl, continuation_chains[chain_idx])
+        from app.services.template_content_filler import (
+            PIPELINE_PLACEHOLDER_FILL,
+            PIPELINE_REBUILD_SECTION_TEMPLATES,
+            fill_slide_highlights_if_placeholder,
+        )
+
+        if fill_slide_highlights_if_placeholder(
+            contd_slide,
+            continuation_chains[chain_idx],
+            track_name=project_name,
+        ):
+            choice = (
+                f"HL pipeline [{project_name}] contd[{chain_idx}]: {PIPELINE_PLACEHOLDER_FILL} "
+                "(template Highlights cell has {…} tokens)"
+            )
+        else:
+            fill_contd_highlights_on_slide(contd_slide, section_tmpl, continuation_chains[chain_idx])
+            choice = (
+                f"HL pipeline [{project_name}] contd[{chain_idx}]: {PIPELINE_REBUILD_SECTION_TEMPLATES} "
+                "(no {…} tokens — cloning section templates)"
+            )
+        print(f"   {choice}", flush=True)
+        logger.info(choice)
+        if pipeline_choices is not None:
+            pipeline_choices.append(choice)
         remove_ka_from_slide(contd_slide)
         sync_header_pictures_from_reference(
             template_prs.slides[template_slide_idx], contd_slide

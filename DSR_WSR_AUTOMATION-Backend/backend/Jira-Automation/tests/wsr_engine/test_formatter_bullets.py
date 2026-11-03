@@ -38,6 +38,11 @@ HASKELL_AUG = (
     / "G10X H-E-B WSR Haskell Location Pharmacy GSS PAM 01 Aug 2025.pptx"
 )
 HASKELL = HASKELL_JULY
+SUSTAINMENT = (
+    Path(__file__).resolve().parents[2]
+    / "templates"
+    / "G10X H-E-B WSR Sustainment 05 June 2026 .pptx"
+)
 
 
 @pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")
@@ -152,6 +157,43 @@ def test_fill_supplier_preserves_text_prefix_dash_bullet():
             p_pr = p.find(qn("a:pPr"))
             assert p_pr is None or p_pr.find(qn("a:buChar")) is None
     assert story_found
+
+
+@pytest.mark.skipif(not SUSTAINMENT.is_file(), reason="Sustainment template missing")
+def test_service_with_missing_current_week_line_uses_canonical_template():
+    """A legacy service slide must not reuse a category header as current-week text."""
+    prs = Presentation(str(SUSTAINMENT))
+    profile = scan_template_profile(SUSTAINMENT)
+    svc = profile.services["Wentworth"]
+    slide = prs.slides[svc.main_slide_index]
+    canonical = discover_section_templates(get_canonical_style_cell(prs, profile))
+    section_tmpl = section_templates_from_profile(slide, svc, fallback_templates=canonical)
+
+    fill_highlights_on_slide(
+        slide,
+        section_tmpl,
+        [
+            {
+                "sprint_bold": "Sprint – Q3.01 FY26 Phoenix, inprogress ",
+                "sprint_light": "(Jun 01 – Jun 15) Stories (Total – 1)",
+                "completed_items": [],
+                "completed_count": "0",
+                "released_items": [],
+                "released_count": "0",
+                "inprogress_items": ["In-progress story"],
+                "inprogress_count": "1",
+            }
+        ],
+    )
+
+    lines = [
+        paragraph_text(p).strip()
+        for p in get_highlights_shape(slide).table.cell(2, 0).text_frame._txBody.findall(qn("a:p"))
+        if paragraph_text(p).strip()
+    ]
+    assert "Current week sprint status" in lines
+    assert not any("completed this week" in line.lower() for line in lines)
+    assert any("in-progress this week – 1 stories" in line.lower() for line in lines)
 
 
 @pytest.mark.skipif(not HASKELL.is_file(), reason="Haskell sample template missing")

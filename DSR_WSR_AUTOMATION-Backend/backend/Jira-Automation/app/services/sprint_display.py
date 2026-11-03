@@ -6,6 +6,27 @@ from datetime import date
 from typing import Any
 
 
+def sprint_status_for_wsr(
+    sprint_start: date | None,
+    sprint_end: date | None,
+    wsr_start: date,
+    wsr_end: date,
+) -> str:
+    """Status of a sprint that is already included in this WSR.
+
+    The stored ``sprints.sprint_status`` value is not used. A sprint that starts
+    on the WSR end date is In Progress even when it also ends that day.
+    """
+    del wsr_start
+    if sprint_start is None or sprint_end is None:
+        return ""
+    if sprint_start == wsr_end:
+        return "In Progress"
+    if sprint_end <= wsr_end:
+        return "Ended"
+    return "In Progress"
+
+
 def format_sprint_dates_for_display(
     sprint_start: date | None,
     sprint_end: date | None,

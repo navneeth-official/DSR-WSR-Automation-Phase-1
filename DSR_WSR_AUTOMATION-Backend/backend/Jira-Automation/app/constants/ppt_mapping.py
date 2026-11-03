@@ -28,16 +28,13 @@ PPT_SLIDE_ORDER: list[str] = [
     "PATRV",
 ]
 
-# Jira status (lowercase) -> highlights bucket
+# Normalised story status (lower case, separators collapsed) -> highlights bucket.
+# Only Done is completed. To Do, Blocked, and anything else are left out of the slide.
 STATUS_TO_BUCKET: dict[str, str] = {
     "done": "completed",
-    "closed": "completed",
-    "resolved": "completed",
     "in review": "released",
-    "in-review": "released",
     "ready for qa": "released",
     "in progress": "inprogress",
-    "in-progress": "inprogress",
     "in development": "inprogress",
 }
 

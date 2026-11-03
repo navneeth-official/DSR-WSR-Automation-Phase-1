@@ -254,7 +254,7 @@ def build_content(raw, totals_raw=None):
     inprogress = raw["inprogress"]
     completed = raw["completed"]
     total = len(totals["released"]) + len(totals["inprogress"]) + len(totals["completed"])
-    sprint_status = totals.get("sprint_status", "In-progress")
+    sprint_status = totals.get("sprint_status") or ""
     return {
         "title": raw["title"],
         "sprint_bold": f"Sprint \u2013 {raw['sprint_name']}, {sprint_status} ",
@@ -278,7 +278,7 @@ def _section_display_content(section):
     inprogress = section["inprogress"]
     completed = section["completed"]
     total = len(released) + len(inprogress) + len(completed)
-    sprint_status = section.get("sprint_status", "In-progress")
+    sprint_status = section.get("sprint_status") or ""
     return {
         "sprint_bold": f"Sprint \u2013 {section['sprint_name']}, {sprint_status} ",
         "sprint_light": (
@@ -309,7 +309,7 @@ def _flatten_story_raw(raw):
         "title": raw["title"],
         "sprint_name": first["sprint_name"],
         "sprint_dates": first["sprint_dates"],
-        "sprint_status": first.get("sprint_status", "In-progress"),
+        "sprint_status": first.get("sprint_status") or "",
         "released": released,
         "inprogress": inprogress,
         "completed": completed,
@@ -351,7 +351,7 @@ def load_slides_from_json(path):
                 "sprint_start_date": chunk.get("sprint_start_date"),
                 "sprint_end_date": chunk.get("sprint_end_date"),
                 "sprint_dates": _sprint_dates_from_payload(chunk),
-                "sprint_status": chunk.get("sprint_status", "In-progress"),
+                "sprint_status": chunk.get("sprint_status") or "",
                 "released": chunk.get("released", []),
                 "inprogress": chunk.get("inprogress", []),
                 "completed": chunk.get("completed", []),
@@ -1379,7 +1379,7 @@ def _split_section_to_cap(section, remaining_cap):
     main = {
         "sprint_name": section["sprint_name"],
         "sprint_dates": section["sprint_dates"],
-        "sprint_status": section.get("sprint_status", "In-progress"),
+        "sprint_status": section.get("sprint_status") or "",
         "released": [],
         "inprogress": [],
         "completed": [],
@@ -1390,7 +1390,7 @@ def _split_section_to_cap(section, remaining_cap):
     tail = {
         "sprint_name": section["sprint_name"],
         "sprint_dates": section["sprint_dates"],
-        "sprint_status": section.get("sprint_status", "In-progress"),
+        "sprint_status": section.get("sprint_status") or "",
         "released": list(section.get("released", [])),
         "inprogress": list(section.get("inprogress", [])),
         "completed": list(section.get("completed", [])),
@@ -3614,7 +3614,7 @@ def main():
                 "title": story_raw["title"],
                 "sprint_name": story_raw["sprint_name"],
                 "sprint_dates": story_raw["sprint_dates"],
-                "sprint_status": story_raw.get("sprint_status", "In-progress"),
+                "sprint_status": story_raw.get("sprint_status") or "",
                 "released": story_raw["released"],
                 "inprogress": story_raw["inprogress"],
                 "completed": story_raw["completed"],

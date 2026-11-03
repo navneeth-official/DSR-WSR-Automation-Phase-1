@@ -13,7 +13,9 @@ from app.wsr_engine.continuation_engine import ensure_continuation_slides, ensur
 from app.wsr_engine.content_parser import section_display_content
 from app.wsr_engine.formatter import (
     clear_ka_on_project_slides,
+    discover_section_templates,
     fill_highlights_on_slide,
+    get_canonical_style_cell,
     section_templates_from_profile,
 )
 from app.wsr_engine.hl_ka_normalizer import normalize_deck_hl_ka_layouts
@@ -78,7 +80,13 @@ class PptWriter:
 
         main_slide = self.prs.slides[main_idx]
         template_slide = self.template_prs.slides[service.main_slide_index]
-        section_tmpl = section_templates_from_profile(template_slide, service)
+        canonical_cell = get_canonical_style_cell(self.template_prs, profile)
+        canonical_section_tmpl = discover_section_templates(canonical_cell)
+        section_tmpl = section_templates_from_profile(
+            template_slide,
+            service,
+            fallback_templates=canonical_section_tmpl,
+        )
 
         layout_profile = build_overflow_profile(
             self.template_prs, template_slide, service, profile
