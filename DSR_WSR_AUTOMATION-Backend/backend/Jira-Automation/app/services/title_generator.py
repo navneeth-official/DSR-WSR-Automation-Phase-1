@@ -94,7 +94,7 @@ def _fallback_title_suggestions(
     if s and jira_key:
         add(f"{jira_key} — {stripped or s}")
     if desc and desc != s and desc not in candidates:
-        snippet = desc if len(desc) <= MAX_TITLE_LENGTH else desc[: MAX_TITLE_LENGTH - 3] + "..."
+        snippet = desc if len(desc) <= MAX_TITLE_LENGTH else _truncate_title(desc)
         add(snippet)
     if s:
         add(f"Delivery update: {stripped or s}")
@@ -185,18 +185,21 @@ def fallback_title(summary: str, description: str | None = None) -> str:
         first = description.strip().split(".")[0].strip()
         if len(first) > len(base):
             base = first
-    base = re.sub(r"\s+", " ", base).strip()
-    if len(base) > MAX_TITLE_LENGTH:
-        base = base[: MAX_TITLE_LENGTH - 3].rsplit(" ", 1)[0] + "..."
-    return base or "Story update"
+    return _truncate_title(base) or "Story update"
+
+
+def _truncate_title(text: str) -> str:
+    """Fit a slide bullet to the length cap without appending an ellipsis."""
+    cleaned = re.sub(r"\s+", " ", (text or "").strip().strip("\"'"))
+    cleaned = re.sub(r"(?:\.\.\.|\u2026)+\s*$", "", cleaned).strip()
+    if len(cleaned) <= MAX_TITLE_LENGTH:
+        return cleaned
+    cut = cleaned[:MAX_TITLE_LENGTH].rsplit(" ", 1)[0].strip()
+    return cut or cleaned[:MAX_TITLE_LENGTH].strip()
 
 
 def _clean_model_output(text: str) -> str:
-    cleaned = text.strip().strip("\"'")
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    if len(cleaned) > MAX_TITLE_LENGTH:
-        cleaned = cleaned[: MAX_TITLE_LENGTH - 3].rsplit(" ", 1)[0] + "..."
-    return cleaned
+    return _truncate_title(text)
 
 
 def generate_title(

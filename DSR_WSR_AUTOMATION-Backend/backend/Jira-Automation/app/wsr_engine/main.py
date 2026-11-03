@@ -13,6 +13,10 @@ from app.services.ppt_cover_date import (
     format_cover_date,
     sync_cover_slide_wsr_date,
 )
+from app.services.ppt_week_end_date import (
+    format_week_end_date,
+    replace_week_end_date_placeholders,
+)
 from app.services.ppt_logo_sync import resolve_logo_reference_slide, sync_all_delivery_slide_logos
 from app.services.template_profile import clone_prototype_service_profile
 from app.wsr_engine.content_parser import load_content
@@ -138,6 +142,14 @@ class WsrEngine:
                 logger.info("Updated cover slide date -> %s", shown)
             else:
                 logger.warning("Cover slide date placeholder not found")
+
+            updated = replace_week_end_date_placeholders(writer.prs, end)
+            if updated:
+                logger.info(
+                    "Updated %d week-end date placeholder(s) -> %s",
+                    updated,
+                    format_week_end_date(end),
+                )
 
         from app.wsr_engine.slide_ops import normalize_slide_partnames
 

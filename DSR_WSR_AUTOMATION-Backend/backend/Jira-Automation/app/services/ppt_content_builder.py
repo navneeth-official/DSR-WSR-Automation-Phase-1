@@ -13,17 +13,28 @@ from app.constants.ppt_mapping import (
     PPT_SLIDE_TITLES,
     STATUS_TO_BUCKET,
 )
+from app.constants.story_status import normalize_status_text
 from app.models.jira_story import JiraStory
 from app.repositories.jira_story_repository import JiraStoryRepository
-from app.services.sprint_display import format_sprint_dates_for_display
+from app.services.sprint_display import format_sprint_dates_for_display, format_sprint_status_label
+
+
+def _strip_trailing_ellipsis(text: str) -> str:
+    """Drop a truncation marker so slide bullets are not suffixed with ``...``."""
+    cleaned = text.strip()
+    while cleaned.endswith("..."):
+        cleaned = cleaned[:-3].rstrip()
+    while cleaned.endswith("\u2026"):
+        cleaned = cleaned[:-1].rstrip()
+    return cleaned
 
 
 def _ppt_story_line(story: JiraStory) -> str:
     """Use the persisted DB title; fall back to summary only for the slide (no LLM)."""
-    title = (story.title or "").strip()
+    title = _strip_trailing_ellipsis(story.title or "")
     if title:
         return title
-    return (story.summary or "").strip()
+    return _strip_trailing_ellipsis(story.summary or "")
 
 
 def _title_usage_stats(stories: list[JiraStory]) -> tuple[int, int]:
@@ -42,15 +53,23 @@ def ppt_slide_title(project_key: str, project_name: str) -> str:
     return PPT_SLIDE_TITLES.get(project_key, project_name)
 
 
-def _sprint_status_label(db_status: str | None) -> str:
-    """Use sprints.sprint_status as-is on the PPT sprint line (fallback when missing)."""
-    if not db_status or not db_status.strip():
-        return "In-progress"
-    return db_status.strip()
+def _sprint_status_label(
+    db_status: str | None,
+    *,
+    sprint_end: date | None = None,
+    report_end: date | None = None,
+) -> str:
+    """``In-progress`` only when the sprint continues past the WSR week; otherwise ``Ended``."""
+    return format_sprint_status_label(
+        db_status,
+        sprint_end=sprint_end,
+        report_end=report_end,
+    )
 
 
-def _bucket_story(status: str | None) -> str:
-    return STATUS_TO_BUCKET.get((status or "").strip().lower(), "completed")
+def _bucket_story(status: str | None) -> str | None:
+    """Map a story status to a WSR bucket. Statuses other than In Progress, In Review, and Done are omitted."""
+    return STATUS_TO_BUCKET.get(normalize_status_text(status))
 
 
 def key_activities_from_inprogress(sections: list[dict[str, Any]]) -> list[str]:
@@ -76,6 +95,8 @@ def _slide_order_key(project_key: str) -> tuple[int, str]:
 
 def build_slide_chunks(
     stories: list[JiraStory],
+    *,
+    report_end: date | None = None,
 ) -> list[dict[str, Any]]:
     """
     Group stories by (project, sprint) and build one JSON chunk per group.
@@ -106,14 +127,21 @@ def build_slide_chunks(
                 released.append(title)
             elif bucket == "inprogress":
                 inprogress.append(title)
-            else:
+            elif bucket == "completed":
                 completed.append(title)
+
+        if not released and not inprogress and not completed:
+            continue
 
         sprint_name = sprint.sprint_name if sprint else "Current Sprint"
         sprint_start = sprint.sprint_start_date if sprint else None
         sprint_end = sprint.sprint_end_date if sprint else None
         sprint_dates = format_sprint_dates_for_display(sprint_start, sprint_end)
-        status_word = _sprint_status_label(sprint.sprint_status if sprint else None)
+        status_word = _sprint_status_label(
+            sprint.sprint_status if sprint else None,
+            sprint_end=sprint_end,
+            report_end=report_end,
+        )
 
         section_payload = {
             "sprint_name": sprint_name,
@@ -240,7 +268,7 @@ def build_ppt_content(
         titles_generated = 0
         titles_reused = titles_from_db
 
-    chunks = build_slide_chunks(stories)
+    chunks = build_slide_chunks(stories, report_end=end_date)
     if merge_titles:
         slides = merge_chunks_by_title(chunks)
     else:

@@ -1,9 +1,60 @@
-"""Format sprint dates for PPT display (always from DB — never clipped to WSR range)."""
+"""Format sprint dates and status for PPT display.
+
+Sprint dates always come from the database and are never clipped to the WSR range.
+The status word on the sprint line is In-progress only when the sprint continues
+past the report week; otherwise it is Ended.
+"""
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any
+
+_ENDED_STATUSES = {"ended", "end", "closed", "complete", "completed", "done"}
+_IN_PROGRESS_STATUSES = {
+    "in progress",
+    "inprogress",
+    "active",
+    "open",
+    "wip",
+    "started",
+}
+
+
+def _normalize_sprint_status(raw: str | None) -> str:
+    return re.sub(r"[\s_\-]+", " ", (raw or "").strip().lower())
+
+
+def format_sprint_status_label(
+    db_status: str | None = None,
+    *,
+    sprint_end: date | None = None,
+    report_end: date | None = None,
+) -> str:
+    """Slide label before the sprint dates: ``In-progress`` or ``Ended``.
+
+    A sprint is In-progress only when its end date is after the WSR week, so it
+    continues into an upcoming week. A sprint that finishes during or before the
+    report week is Ended. Stored values such as ``inprogress`` are not shown.
+    """
+    if sprint_end is not None and report_end is not None:
+        if sprint_end > report_end:
+            return "In-progress"
+        return "Ended"
+
+    key = _normalize_sprint_status(db_status).replace(" ", "")
+    if key in _ENDED_STATUSES or _normalize_sprint_status(db_status) in _ENDED_STATUSES:
+        return "Ended"
+    if key in {item.replace(" ", "") for item in _IN_PROGRESS_STATUSES}:
+        return "In-progress"
+    if db_status and db_status.strip():
+        text = db_status.strip()
+        if text.lower() == "in-progress":
+            return "In-progress"
+        if text.lower() == "ended":
+            return "Ended"
+    return "In-progress"
 
 
 def format_sprint_dates_for_display(

@@ -28,17 +28,13 @@ PPT_SLIDE_ORDER: list[str] = [
     "PATRV",
 ]
 
-# Jira status (lowercase) -> highlights bucket
+# Normalised story status -> highlights bucket.
+# WSR decks include only In Progress, In Review, and Done.
+# To Do, Blocked, and every other status are omitted.
 STATUS_TO_BUCKET: dict[str, str] = {
     "done": "completed",
-    "closed": "completed",
-    "resolved": "completed",
     "in review": "released",
-    "in-review": "released",
-    "ready for qa": "released",
     "in progress": "inprogress",
-    "in-progress": "inprogress",
-    "in development": "inprogress",
 }
 
 # Blank KA bullet rows reserved for manual BSA entry

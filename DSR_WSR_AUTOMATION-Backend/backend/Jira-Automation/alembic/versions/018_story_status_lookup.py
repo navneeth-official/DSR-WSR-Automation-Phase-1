@@ -77,11 +77,27 @@ def _backfill_case_sql() -> str:
     return f"CASE {whens} ELSE 1 END"
 
 
+def _column_map(insp, table_name: str) -> dict:
+    return {col["name"]: col for col in insp.get_columns(table_name)}
+
+
+def _is_integer(col) -> bool:
+    return isinstance(col["type"], sa.Integer)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     insp = inspect(bind)
+    tables = set(insp.get_table_names())
 
-    if "story_statuses" not in insp.get_table_names():
+    # An earlier draft of this migration stored the lookup as jira_story_statuses
+    # and kept the integer FK on jira_stories.status.
+    if "jira_story_statuses" in tables and "story_statuses" not in tables:
+        op.rename_table("jira_story_statuses", "story_statuses")
+        tables.discard("jira_story_statuses")
+        tables.add("story_statuses")
+
+    if "story_statuses" not in tables:
         op.create_table(
             "story_statuses",
             sa.Column("status_id", sa.Integer(), primary_key=True, autoincrement=False),
@@ -103,26 +119,56 @@ def upgrade() -> None:
     if missing:
         op.bulk_insert(statuses_table, missing)
 
-    cols = {col["name"] for col in insp.get_columns("jira_stories")}
+    for status_id, name in STATUSES:
+        bind.execute(
+            sa.text(
+                "UPDATE story_statuses SET status_name = :name WHERE status_id = :status_id"
+            ),
+            {"name": name, "status_id": status_id},
+        )
+
+    insp = inspect(bind)
+    cols = _column_map(insp, "jira_stories")
+    status_col = cols.get("status")
+    if "status_id" not in cols and status_col is not None and _is_integer(status_col):
+        op.alter_column("jira_stories", "status", new_column_name="status_id")
+        insp = inspect(bind)
+        cols = _column_map(insp, "jira_stories")
+
     if "status_id" not in cols:
         op.add_column("jira_stories", sa.Column("status_id", sa.Integer(), nullable=True))
+        cols["status_id"] = {"name": "status_id"}
 
     if "status" in cols:
         op.execute(sa.text(f"UPDATE jira_stories SET status_id = {_backfill_case_sql()}"))
     op.execute(sa.text("UPDATE jira_stories SET status_id = 1 WHERE status_id IS NULL"))
 
     op.alter_column("jira_stories", "status_id", existing_type=sa.Integer(), nullable=False)
-    op.create_foreign_key(
-        "fk_jira_stories_status_id",
-        "jira_stories",
-        "story_statuses",
-        ["status_id"],
-        ["status_id"],
-        ondelete="RESTRICT",
-    )
-    op.create_index("ix_jira_stories_status_id", "jira_stories", ["status_id"])
 
-    if "status" in cols:
+    insp = inspect(bind)
+    has_status_fk = any(
+        fk.get("referred_table") == "story_statuses"
+        and fk.get("constrained_columns") == ["status_id"]
+        for fk in insp.get_foreign_keys("jira_stories")
+    )
+    if not has_status_fk:
+        op.create_foreign_key(
+            "fk_jira_stories_status_id",
+            "jira_stories",
+            "story_statuses",
+            ["status_id"],
+            ["status_id"],
+            ondelete="RESTRICT",
+        )
+
+    index_names = {ix["name"] for ix in insp.get_indexes("jira_stories")}
+    if "ix_jira_stories_status" in index_names and "ix_jira_stories_status_id" not in index_names:
+        op.execute(sa.text("ALTER INDEX ix_jira_stories_status RENAME TO ix_jira_stories_status_id"))
+        index_names.add("ix_jira_stories_status_id")
+    if "ix_jira_stories_status_id" not in index_names:
+        op.create_index("ix_jira_stories_status_id", "jira_stories", ["status_id"])
+
+    if "status" in _column_map(inspect(bind), "jira_stories"):
         # Dropping the column also drops its ix_jira_stories_status index.
         op.drop_column("jira_stories", "status")
 

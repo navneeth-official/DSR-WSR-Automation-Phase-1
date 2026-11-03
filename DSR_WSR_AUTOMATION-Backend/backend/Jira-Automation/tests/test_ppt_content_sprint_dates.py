@@ -116,6 +116,90 @@ def test_key_activities_from_inprogress_empty_when_no_stories():
     assert key_activities_from_inprogress([{"inprogress": []}]) == []
 
 
+def test_build_slide_chunks_keeps_only_in_progress_in_review_and_done():
+    """To Do, Blocked, and any other status must not appear on the WSR deck."""
+    specs = [
+        ("COST-1", "Done", "Shipped the API"),
+        ("COST-2", "In Review", "Review the ledger"),
+        ("COST-3", "In Progress", "Build the feed"),
+        ("COST-4", "In-Progress", "Hyphenated progress"),
+        ("COST-5", "To Do", "Not started yet"),
+        ("COST-6", "Blocked", "Waiting on vendor"),
+        ("COST-7", "Closed", "Legacy closed"),
+    ]
+    stories = []
+    for key, status, title in specs:
+        story = _story(
+            jira_key=key,
+            sprint_name="Q3.01 FY26 Atlas",
+            sprint_start=date(2026, 6, 4),
+            sprint_end=date(2026, 6, 17),
+        )
+        story.status = status
+        story.title = title
+        stories.append(story)
+
+    chunk = build_slide_chunks(stories)[0]
+    assert chunk["completed"] == ["Shipped the API"]
+    assert chunk["released"] == ["Review the ledger"]
+    assert chunk["inprogress"] == ["Build the feed", "Hyphenated progress"]
+    assert chunk["key_activities"] == ["Build the feed", "Hyphenated progress"]
+
+
+def test_build_slide_chunks_omits_sprint_that_only_has_excluded_statuses():
+    story = _story(
+        jira_key="COST-8",
+        sprint_name="Q3.01 FY26 Atlas",
+        sprint_start=date(2026, 6, 4),
+        sprint_end=date(2026, 6, 17),
+    )
+    story.status = "To Do"
+    story.title = "Not started yet"
+    assert build_slide_chunks([story]) == []
+
+
+def test_sprint_status_is_ended_when_sprint_does_not_continue_past_the_week():
+    ended = _story(
+        jira_key="PATRV-1",
+        sprint_name="Zazrivsky",
+        sprint_start=date(2026, 10, 19),
+        sprint_end=date(2026, 11, 2),
+        sprint_status="inprogress",
+    )
+    continuing = _story(
+        jira_key="COST-1",
+        sprint_name="Dusty Hand Galaxy - Sprint 1",
+        sprint_start=date(2026, 10, 28),
+        sprint_end=date(2026, 11, 11),
+        sprint_status="inprogress",
+    )
+    continuing.sprint_id = 8
+    continuing.project_id = 2
+
+    chunks = build_slide_chunks(
+        [ended, continuing],
+        report_end=date(2026, 11, 6),
+    )
+    by_name = {chunk["sprint_name"]: chunk for chunk in chunks}
+    assert by_name["Zazrivsky"]["sprint_status"] == "Ended"
+    assert by_name["Dusty Hand Galaxy - Sprint 1"]["sprint_status"] == "In-progress"
+
+
+def test_story_bullets_drop_trailing_ellipsis():
+    story = _story(
+        jira_key="COST-9",
+        sprint_name="Q3.01 FY26 Atlas",
+        sprint_start=date(2026, 6, 4),
+        sprint_end=date(2026, 6, 17),
+    )
+    story.title = 'Setup a process to backfill approved tariff surcharges...'
+    story.status = "Done"
+    chunk = build_slide_chunks([story], report_end=date(2026, 6, 12))[0]
+    assert chunk["completed"] == [
+        "Setup a process to backfill approved tariff surcharges"
+    ]
+
+
 def test_build_slide_chunks_populates_key_activities_from_inprogress():
     story = _story(
         jira_key="COST-99",

@@ -17,6 +17,7 @@ from app.wsr_engine.models import ProjectMap
 
 logger = logging.getLogger(__name__)
 
+_SLIDE_JUMP_ACTION = "ppaction://hlinksldjump"
 _INDEX_NUMBER_RE = re.compile(r"^\d{1,2}\u200b?$")
 
 _INDEX_LABEL_KEYWORDS: tuple[str, ...] = (
@@ -97,10 +98,37 @@ def _set_paragraph_slide_number(paragraph, slide_number: int) -> None:
         paragraph.add_run().text = display
 
 
-def _set_element_hyperlink_to_slide(hlink_elem, index_slide, target_slide_idx, prs) -> None:
-    target_part = prs.slides[target_slide_idx].part
-    slide_rid = index_slide.part.relate_to(target_part, RT.SLIDE)
+def _center_index_paragraph(p_elem) -> None:
+    """Center a contents number or title in the cell, ignoring column indents."""
+    props = p_elem.find(qn("a:pPr"))
+    if props is None:
+        props = p_elem.makeelement(qn("a:pPr"), {})
+        p_elem.insert(0, props)
+    props.set("algn", "ctr")
+    for attr in ("marL", "marR", "indent"):
+        if attr in props.attrib:
+            del props.attrib[attr]
+    tabs = props.find(qn("a:tabLst"))
+    if tabs is not None:
+        props.remove(tabs)
+
+
+def _apply_slide_jump(hlink_elem, slide_rid: str) -> None:
     hlink_elem.set(qn("r:id"), slide_rid)
+    hlink_elem.set("action", _SLIDE_JUMP_ACTION)
+
+
+def _ensure_run_slide_jump(run_elem, slide_rid: str) -> None:
+    """Put a slide jump on the run that actually displays the number or title."""
+    run_props = run_elem.find(qn("a:rPr"))
+    if run_props is None:
+        run_props = run_elem.makeelement(qn("a:rPr"), {})
+        run_elem.insert(0, run_props)
+    hyperlink = run_props.find(qn("a:hlinkClick"))
+    if hyperlink is None:
+        hyperlink = run_props.makeelement(qn("a:hlinkClick"), {})
+        run_props.append(hyperlink)
+    _apply_slide_jump(hyperlink, slide_rid)
 
 
 def _update_cell_index_entry(cell, index_slide, target_slide_idx, prs) -> bool:
@@ -115,10 +143,26 @@ def _update_cell_index_entry(cell, index_slide, target_slide_idx, prs) -> bool:
                 _set_paragraph_slide_number(paragraph, display_num)
                 changed = True
 
+    slide_rid = index_slide.part.relate_to(
+        prs.slides[target_slide_idx].part,
+        RT.SLIDE,
+    )
     tx_body = cell.text_frame._txBody
     for p_elem in tx_body.findall(qn("a:p")):
-        for hlink in p_elem.iter(qn("a:hlinkClick")):
-            _set_element_hyperlink_to_slide(hlink, index_slide, target_slide_idx, prs)
+        has_visible_text = False
+        for run in p_elem.findall(qn("a:r")):
+            text_elem = run.find(qn("a:t"))
+            text = "" if text_elem is None or not text_elem.text else text_elem.text
+            if not text.strip():
+                continue
+            has_visible_text = True
+            _ensure_run_slide_jump(run, slide_rid)
+            changed = True
+        if has_visible_text:
+            _center_index_paragraph(p_elem)
+            changed = True
+        for hyperlink in p_elem.iter(qn("a:hlinkClick")):
+            _apply_slide_jump(hyperlink, slide_rid)
             changed = True
 
     return changed
@@ -281,8 +325,12 @@ def _match_project_for_index(projects: list[ProjectMap], search_title: str) -> P
         name = proj.project_name.lower()
         if needle == "location core service" and "loco" in name and "location core" not in name:
             continue
-        score = fuzz.partial_ratio(needle, name)
-        if score > best_score and score >= 85:
+        if needle == name or needle in name or name in needle:
+            score = 100
+        else:
+            score = int(fuzz.token_set_ratio(needle, name))
+        # Shared words such as "core service" must not map Supplier/Pricing onto Cost.
+        if score > best_score and score >= 90:
             best_score = score
             best = proj
     return best
@@ -353,25 +401,42 @@ def _cell_identity(cell) -> int:
     return id(cell._tc)
 
 
+def _index_label(project: ProjectMap, content_labels: dict[str, str]) -> str:
+    return content_labels.get(project.project_name, project.project_name)
+
+
+def delivery_index_entries(
+    projects: list[ProjectMap],
+    content_labels: dict[str, str] | None = None,
+) -> list[tuple[int, str]]:
+    """One index row per delivery track, in deck order, with that track's own title."""
+    labels = content_labels or {}
+    entries: list[tuple[int, str]] = []
+    seen_targets: set[int] = set()
+    for project in sorted(projects, key=lambda item: item.main_slide_index):
+        if project.main_slide_index in seen_targets:
+            continue
+        seen_targets.add(project.main_slide_index)
+        entries.append((project.main_slide_index, _index_label(project, labels)))
+    return entries
+
+
 def _collect_rebuild_entries(
     prs: Presentation,
     projects: list[ProjectMap],
     layout: IndexLayout,
     content_labels: dict[str, str],
 ) -> list[tuple[int, str]]:
-    """Ordered (target_slide_idx, label) pairs following template slot order."""
-    entries: list[tuple[int, str]] = []
+    """Delivery tracks in slide order, then static rows such as Matters of Attention."""
+    entries = delivery_index_entries(projects, content_labels)
+    seen_targets = {target for target, _label in entries}
     for slot in layout.slots:
         if slot.is_delivery:
-            proj = _match_project_for_index(projects, slot.search_title)
-            if proj is None:
-                continue
-            label = content_labels.get(proj.project_name, proj.project_name)
-            entries.append((proj.main_slide_index, label))
             continue
         target_idx = _find_static_slide_index(prs, slot.search_title)
-        if target_idx is None:
+        if target_idx is None or target_idx in seen_targets:
             continue
+        seen_targets.add(target_idx)
         entries.append((target_idx, slot.search_title))
     return entries
 
