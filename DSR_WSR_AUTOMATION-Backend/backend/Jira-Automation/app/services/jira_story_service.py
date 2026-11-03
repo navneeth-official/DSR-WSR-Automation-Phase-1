@@ -166,7 +166,7 @@ class JiraStoryService:
         )
 
     def _save_story(self, body: JiraStorySaveRequest, *, snapshot_date: date) -> JiraStory:
-        project_key, project_name = _resolve_track(body.track)
+        project_key, project_name = _resolve_track(body.track, body.project_name)
         completion = body.percent_complete
         if completion is None:
             completion = infer_completion(body.status)
@@ -230,6 +230,7 @@ def _story_to_save_request(story: JiraStory) -> JiraStorySaveRequest:
         jira_key=story.jira_key,
         summary=story.summary,
         track=story.project.project_key,
+        project_name=story.project.project_name,
         sprint=sprint.sprint_name if sprint else None,
         sprint_start_date=sprint.sprint_start_date if sprint else None,
         sprint_end_date=sprint.sprint_end_date if sprint else None,
@@ -249,9 +250,16 @@ def _story_to_save_request(story: JiraStory) -> JiraStorySaveRequest:
     )
 
 
-def _resolve_track(track: str) -> tuple[str, str]:
+def _resolve_track(track: str, project_name: str | None = None) -> tuple[str, str]:
+    """Return (project_key, display_name) for intake/create.
+
+    Prefer an explicit ``project_name`` from JSON so new tracks (SM, SP, RXD, …)
+    keep their real titles instead of falling back to the short key.
+    Canonical HEB keys still resolve to their known display names.
+    """
     normalized = track.strip()
-    project_key = normalize_project_key(normalized, normalized)
+    display_hint = (project_name or "").strip() or normalized
+    project_key = normalize_project_key(normalized, display_hint)
 
     for name, key in CANONICAL_PROJECT_KEYS.items():
         if key == project_key:
@@ -259,6 +267,9 @@ def _resolve_track(track: str) -> tuple[str, str]:
 
     if normalized in CANONICAL_PROJECT_KEYS:
         return CANONICAL_PROJECT_KEYS[normalized], normalized
+
+    if display_hint and display_hint != normalized:
+        return project_key, display_hint
 
     return project_key, normalized
 

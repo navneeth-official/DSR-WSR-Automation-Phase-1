@@ -63,6 +63,8 @@ export interface StorySavePayload {
   jira_key: string;
   summary: string;
   track: string;
+  /** Display name for the track (e.g. Supplier Core). Persisted on projects. */
+  project_name?: string | null;
   sprint?: string | null;
   sprint_start_date?: string | null;
   sprint_end_date?: string | null;
@@ -229,6 +231,7 @@ export function recordToSavePayload(
     jira_key: row.jira_key,
     summary: row.summary,
     track: trackCode ?? row.project_key,
+    project_name: row.project_name?.trim() || null,
     sprint: row.sprint_name || null,
     sprint_start_date: row.sprint_start_date || null,
     sprint_end_date: row.sprint_end_date || null,

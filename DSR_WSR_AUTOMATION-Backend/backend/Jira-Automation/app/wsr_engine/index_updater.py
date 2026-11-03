@@ -359,15 +359,24 @@ def _collect_rebuild_entries(
     layout: IndexLayout,
     content_labels: dict[str, str],
 ) -> list[tuple[int, str]]:
-    """Ordered (target_slide_idx, label) pairs following template slot order."""
+    """Build Index entries from actual deck projects, then static template rows.
+
+    Delivery tracks are content-driven (any key/name from this week's data), not
+    limited to the hardcoded HEB Index keyword list. Static rows (Matters of
+    Attention, Team Allocation) still come from the template layout.
+    """
     entries: list[tuple[int, str]] = []
+    seen_slides: set[int] = set()
+
+    for proj in projects:
+        if proj.main_slide_index in seen_slides:
+            continue
+        seen_slides.add(proj.main_slide_index)
+        label = content_labels.get(proj.project_name, proj.project_name)
+        entries.append((proj.main_slide_index, label))
+
     for slot in layout.slots:
         if slot.is_delivery:
-            proj = _match_project_for_index(projects, slot.search_title)
-            if proj is None:
-                continue
-            label = content_labels.get(proj.project_name, proj.project_name)
-            entries.append((proj.main_slide_index, label))
             continue
         target_idx = _find_static_slide_index(prs, slot.search_title)
         if target_idx is None:
@@ -420,12 +429,16 @@ def rebuild_index_from_projects(
         ):
             _clear_index_cell_completely(cell)
 
+    fallback_proto = next(iter(layout.column_prototypes.values()), None) if layout.column_prototypes else None
+
     updated = 0
     for (target_idx, label), (row, col) in zip(entries, positions):
         cell = _index_cell_at(table, row, col)
         if cell is None:
             continue
         proto = layout.column_prototypes.get(col)
+        if proto is None:
+            proto = fallback_proto
         if proto is not None:
             _clone_cell_text_body(cell, proto)
         _set_index_cell_content(cell, target_idx + 1, label)

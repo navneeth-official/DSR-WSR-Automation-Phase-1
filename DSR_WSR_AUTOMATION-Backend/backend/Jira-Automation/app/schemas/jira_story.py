@@ -16,6 +16,11 @@ class JiraStorySaveRequest(BaseModel):
     jira_key: str = Field(description="Jira Key")
     summary: str = Field(description="Summary")
     track: str = Field(description="Track project key or name, e.g. LOC or LOCO")
+    project_name: str | None = Field(
+        default=None,
+        description="Optional display name for the track (e.g. Supplier Core). "
+        "When omitted, track is used as both key and name.",
+    )
     sprint: str | None = Field(default=None, description="Sprint name")
     sprint_start_date: FlexibleDate = None
     sprint_end_date: FlexibleDate = None
