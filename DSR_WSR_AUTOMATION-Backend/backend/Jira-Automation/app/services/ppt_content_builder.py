@@ -93,6 +93,37 @@ def _slide_order_key(project_key: str) -> tuple[int, str]:
         return (len(PPT_SLIDE_ORDER), project_key)
 
 
+def _sprint_section_order(sprint_status: str) -> int:
+    """Within a project slide, list In-progress sprints before Ended."""
+    if sprint_status == "In-progress":
+        return 0
+    return 1
+
+
+def _date_desc_nulls_last(value: date | None) -> tuple[int, int]:
+    """Sort key fragment: latest dates first; missing dates last."""
+    if value is None:
+        return (1, 0)
+    return (0, -value.toordinal())
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
+def _sprint_within_status_sort_key(chunk: dict[str, Any]) -> tuple[int, int, str]:
+    """Among sprints with the same status: latest start (in-progress) or end (ended) first."""
+    sprint_start = _parse_iso_date(chunk.get("sprint_start_date"))
+    sprint_end = _parse_iso_date(chunk.get("sprint_end_date"))
+    if chunk.get("sprint_status") == "In-progress":
+        date_key = _date_desc_nulls_last(sprint_start)
+    else:
+        date_key = _date_desc_nulls_last(sprint_end)
+    return (*date_key, chunk.get("sprint_name", ""))
+
+
 def build_slide_chunks(
     stories: list[JiraStory],
     *,
@@ -166,7 +197,8 @@ def build_slide_chunks(
     chunks.sort(
         key=lambda c: (
             _slide_order_key(c["project_key"]),
-            c["sprint_name"],
+            _sprint_section_order(c["sprint_status"]),
+            _sprint_within_status_sort_key(c),
         )
     )
     return chunks

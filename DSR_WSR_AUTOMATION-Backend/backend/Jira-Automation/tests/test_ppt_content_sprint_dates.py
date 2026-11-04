@@ -185,6 +185,82 @@ def test_sprint_status_is_ended_when_sprint_does_not_continue_past_the_week():
     assert by_name["Dusty Hand Galaxy - Sprint 1"]["sprint_status"] == "In-progress"
 
 
+def test_build_slide_chunks_orders_inprogress_sprints_before_ended_same_project():
+    """Alphabetical name must not put Ended sprints above In-progress on one slide."""
+    ended = _story(
+        jira_key="COST-1",
+        sprint_name="Alpha Sprint",
+        sprint_start=date(2026, 10, 1),
+        sprint_end=date(2026, 10, 15),
+    )
+    in_progress = _story(
+        jira_key="COST-2",
+        sprint_name="Zulu Sprint",
+        sprint_start=date(2026, 10, 20),
+        sprint_end=date(2026, 11, 15),
+    )
+    in_progress.sprint_id = 9
+
+    chunks = build_slide_chunks(
+        [ended, in_progress],
+        report_end=date(2026, 10, 30),
+    )
+    assert [c["sprint_name"] for c in chunks] == ["Zulu Sprint", "Alpha Sprint"]
+    assert chunks[0]["sprint_status"] == "In-progress"
+    assert chunks[1]["sprint_status"] == "Ended"
+
+    merged = group_chunks_by_slide_title(chunks)
+    assert [s["sprint_name"] for s in merged[0]["sections"]] == [
+        "Zulu Sprint",
+        "Alpha Sprint",
+    ]
+
+
+def test_build_slide_chunks_orders_inprogress_by_latest_start_first():
+    older = _story(
+        jira_key="COST-1",
+        sprint_name="Alpha Sprint",
+        sprint_start=date(2026, 10, 1),
+        sprint_end=date(2026, 11, 30),
+    )
+    newer = _story(
+        jira_key="COST-2",
+        sprint_name="Zulu Sprint",
+        sprint_start=date(2026, 10, 20),
+        sprint_end=date(2026, 11, 30),
+    )
+    newer.sprint_id = 10
+
+    chunks = build_slide_chunks(
+        [older, newer],
+        report_end=date(2026, 10, 30),
+    )
+    assert [c["sprint_name"] for c in chunks] == ["Zulu Sprint", "Alpha Sprint"]
+
+
+def test_build_slide_chunks_orders_ended_by_latest_end_first():
+    ended_earlier = _story(
+        jira_key="COST-1",
+        sprint_name="Zulu Sprint",
+        sprint_start=date(2026, 9, 1),
+        sprint_end=date(2026, 10, 10),
+    )
+    ended_later = _story(
+        jira_key="COST-2",
+        sprint_name="Alpha Sprint",
+        sprint_start=date(2026, 9, 15),
+        sprint_end=date(2026, 10, 25),
+    )
+    ended_later.sprint_id = 11
+
+    chunks = build_slide_chunks(
+        [ended_earlier, ended_later],
+        report_end=date(2026, 10, 30),
+    )
+    assert all(c["sprint_status"] == "Ended" for c in chunks)
+    assert [c["sprint_name"] for c in chunks] == ["Alpha Sprint", "Zulu Sprint"]
+
+
 def test_story_bullets_drop_trailing_ellipsis():
     story = _story(
         jira_key="COST-9",
