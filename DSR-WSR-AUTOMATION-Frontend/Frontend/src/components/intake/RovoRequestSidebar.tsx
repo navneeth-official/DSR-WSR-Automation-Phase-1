@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Copy } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy } from "lucide-react";
 import { isCatalogTrackActive, type TrackListItem } from "@/api/dsr";
 import { fetchEmployeesByTeam, type EmployeeTrackItem } from "@/api/employees";
 import { copyTextToClipboard } from "@/lib/clipboard";
@@ -17,7 +17,7 @@ const TAB_CONFIG: { id: SidebarTab; label: string; subtitle: string }[] = [
   {
     id: "rovo",
     label: "Rovo request format",
-    subtitle: "All active assignees across tracks",
+    subtitle: "Filter by track to see assignees",
   },
   {
     id: "assignees",
@@ -47,10 +47,12 @@ function getFridayOf(monday: Date): Date {
   return d;
 }
 
-/** Unique employee names with at least one active assignment on an active track. */
+/** Unique employee names with at least one active assignment on an active track.
+ *  When `filterProjectId` is provided, only employees assigned to that specific track are returned. */
 function uniqueActiveAssigneeNames(
   rows: Pick<EmployeeTrackItem, "employee_name" | "is_active" | "project_id">[],
   trackCatalog: TrackListItem[],
+  filterProjectId?: number | null,
 ): string[] {
   const activeTrackIds = new Set(
     trackCatalog.filter(isCatalogTrackActive).map((t) => t.project_id),
@@ -60,6 +62,8 @@ function uniqueActiveAssigneeNames(
   for (const row of rows) {
     if (!row.is_active) continue;
     if (!activeTrackIds.has(row.project_id)) continue;
+    // If a track filter is active, only include employees on that track
+    if (filterProjectId != null && row.project_id !== filterProjectId) continue;
     const name = row.employee_name.trim();
     if (!name || seen.has(name)) continue;
     seen.add(name);
@@ -127,6 +131,9 @@ function RovoPanel({
   activityEnd,
   onDateChange,
   snapshotIso,
+  trackCatalog,
+  selectedTrackProjectId,
+  onTrackChange,
 }: {
   assignees: string[];
   employeesLoading: boolean;
@@ -135,13 +142,59 @@ function RovoPanel({
   activityEnd: Date | null;
   onDateChange: (start: Date | null, end: Date | null) => void;
   snapshotIso: string;
+  trackCatalog: TrackListItem[];
+  selectedTrackProjectId: number | null;
+  onTrackChange: (projectId: number | null) => void;
 }) {
   const activityStartIso = activityStart ? isoDate(activityStart) : "YYYY-MM-DD";
   const activityEndIso = activityEnd ? isoDate(activityEnd) : "YYYY-MM-DD";
   const activityPhrase = formatActivityDatePhrase(activityStartIso, activityEndIso);
 
+  const activeTracks = trackCatalog.filter(isCatalogTrackActive);
+
   return (
     <div className="text-xs text-gray-700 leading-relaxed space-y-4">
+      {/* Track selector */}
+      <section>
+        <label className="block font-medium text-gray-800 mb-1.5">
+          Filter by Track
+        </label>
+        <div className="relative">
+          <select
+            value={selectedTrackProjectId ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              onTrackChange(val === "" ? null : Number(val));
+            }}
+            className="w-full appearance-none border border-gray-300 rounded-md bg-white text-xs text-gray-700 px-3 py-1.5 pr-7 focus:outline-none focus:ring-1 focus:ring-brand-red/40 cursor-pointer"
+          >
+            <option value="">All Tracks</option>
+            {activeTracks.map((t) => (
+              <option key={t.project_id} value={t.project_id}>
+                {t.project_name} ({t.project_key})
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+        </div>
+        {selectedTrackProjectId != null && (
+          <p className="mt-1 text-[10px] text-gray-400">
+            Showing assignees for{" "}
+            <span className="font-medium text-gray-600">
+              {activeTracks.find((t) => t.project_id === selectedTrackProjectId)?.project_name ?? "selected track"}
+            </span>{" "}
+            only.{" "}
+            <button
+              type="button"
+              onClick={() => onTrackChange(null)}
+              className="text-brand-red hover:underline"
+            >
+              Show all
+            </button>
+          </p>
+        )}
+      </section>
+
       <section>
         <p className="font-medium text-gray-800 mb-2">
           Retrieve all Jira issues assigned to:
@@ -152,11 +205,15 @@ function RovoPanel({
           <p className="text-red-500 mb-2">{employeesError}</p>
         ) : assignees.length === 0 ? (
           <p className="text-gray-400 mb-2">
-            No active assignees found. Use the Assignees tab to add one, or run{" "}
-            <code className="text-[10px] bg-gray-100 px-1 rounded">
-              backfill_employees_from_stories.py
-            </code>
-            .
+            {selectedTrackProjectId != null
+              ? "No active assignees found for this track. Select a different track or use the Assignees tab."
+              : "No active assignees found. Use the Assignees tab to add one, or run "}
+            {selectedTrackProjectId == null && (
+              <code className="text-[10px] bg-gray-100 px-1 rounded">
+                backfill_employees_from_stories.py
+              </code>
+            )}
+            {selectedTrackProjectId == null && "."}
           </p>
         ) : (
           <ul className="space-y-1 mb-2">
@@ -273,6 +330,8 @@ export function RovoRequestSidebar({
   const [activityEnd, setActivityEnd] = useState<Date | null>(defaultFriday);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [employeesError, setEmployeesError] = useState("");
+  // Track filter for the Rovo request prompt (null = all tracks)
+  const [selectedTrackProjectId, setSelectedTrackProjectId] = useState<number | null>(null);
   const [copyHint, setCopyHint] = useState("");
   const sidebarRootRef = useRef<HTMLDivElement>(null);
   const {
@@ -310,8 +369,8 @@ export function RovoRequestSidebar({
   }, [employeeRefreshKey]);
 
   const assignees = useMemo(
-    () => uniqueActiveAssigneeNames(employeeRows, trackCatalog),
-    [employeeRows, trackCatalog],
+    () => uniqueActiveAssigneeNames(employeeRows, trackCatalog, selectedTrackProjectId),
+    [employeeRows, trackCatalog, selectedTrackProjectId],
   );
 
   const handleAssigneeChanged = useCallback(
@@ -444,6 +503,9 @@ export function RovoRequestSidebar({
                   setActivityEnd(e);
                 }}
                 snapshotIso={snapshotIso}
+                trackCatalog={trackCatalog}
+                selectedTrackProjectId={selectedTrackProjectId}
+                onTrackChange={setSelectedTrackProjectId}
               />
             ) : activeTab === "assignees" ? (
               <AssigneeEditorPanel

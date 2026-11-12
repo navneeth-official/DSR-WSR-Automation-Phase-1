@@ -112,6 +112,46 @@ const SAMPLE_DATA = [
 
 type JiraIssue = (typeof SAMPLE_DATA)[0] & { reportee?: string; date_assigned?: string };
 
+/** Treat null, undefined, empty strings, and whitespace-only strings as missing. */
+function hasText(value: unknown): boolean {
+  return value != null && String(value).trim().length > 0;
+}
+
+/** A story is missing sprint information only when its name and both duration dates are absent. */
+function isMissingSprintInfo(
+  row: Pick<JiraIssue, "sprint_name" | "sprint_start_date" | "sprint_end_date">,
+): boolean {
+  return (
+    !hasText(row.sprint_name) &&
+    !hasText(row.sprint_start_date) &&
+    !hasText(row.sprint_end_date)
+  );
+}
+
+/**
+ * Returns true when a known sprint duration is entirely before or after
+ * the current Monday-Friday week. A sprint overlapping this week is not flagged.
+ */
+function isSprintOutsideCurrentWeek(
+  row: Pick<JiraIssue, "sprint_start_date" | "sprint_end_date">,
+  referenceDate: Date = new Date(),
+): boolean {
+  if (!hasText(row.sprint_start_date) || !hasText(row.sprint_end_date)) {
+    return false;
+  }
+
+  const startDate = String(row.sprint_start_date).trim().slice(0, 10);
+  const endDate = String(row.sprint_end_date).trim().slice(0, 10);
+  if (!parseIsoDate(startDate) || !parseIsoDate(endDate)) return false;
+
+  const monday = getMondayOf(referenceDate);
+  const friday = getFridayOf(monday);
+  const currentWeekStart = isoDate(monday);
+  const currentWeekEnd = isoDate(friday);
+
+  return endDate < currentWeekStart || startDate > currentWeekEnd;
+}
+
 type StoryStatus = "To Do" | "In Progress" | "In Review" | "Done" | "Blocked";
 
 /** Maps a raw status to a known story status, or null when it has no mapping. */
@@ -889,20 +929,58 @@ function IssueTypeBadge({ type }: { type: string }) {
   );
 }
 
+const PRIORITY_LEVELS = ["High", "Medium", "Low"] as const;
+type PriorityLevel = (typeof PRIORITY_LEVELS)[number];
+
+const PRIORITY_STYLES: Record<string, string> = {
+  Low: "bg-gray-100 text-gray-500 border border-gray-200",
+  Medium: "bg-yellow-50 text-yellow-700 border border-yellow-200",
+  High: "bg-orange-50 text-orange-700 border border-orange-200",
+  Critical: "bg-red-100 text-red-700 border border-red-200",
+};
+
 function PriorityBadge({ priority }: { priority: string }) {
-  const map: Record<string, string> = {
-    Low: "bg-gray-100 text-gray-500 border border-gray-200",
-    Medium:
-      "bg-yellow-50 text-yellow-700 border border-yellow-200",
-    High: "bg-orange-50 text-orange-700 border border-orange-200",
-    Critical: "bg-red-100 text-red-700 border border-red-200",
-  };
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${map[priority] ?? "bg-gray-100 text-gray-500 border border-gray-200"}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${PRIORITY_STYLES[priority] ?? "bg-gray-100 text-gray-500 border border-gray-200"}`}
     >
-      {priority}
+      {priority || "—"}
     </span>
+  );
+}
+
+/** Inline editable priority select — uses same visual style as DsrEditableStatus */
+function DsrEditablePriority({
+  value,
+  onSave,
+}: {
+  value: string;
+  onSave: (v: PriorityLevel) => void;
+}) {
+  const current = (PRIORITY_LEVELS as readonly string[]).includes(value)
+    ? (value as PriorityLevel)
+    : null;
+  return (
+    <select
+      value={current ?? ""}
+      onChange={(e) => onSave(e.target.value as PriorityLevel)}
+      className={`px-2 py-1 border rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-red/30 ${
+        !current ? "border-amber-300 text-amber-600" : "border-gray-200"
+      } ${
+        current === "High"
+          ? "text-orange-700"
+          : current === "Medium"
+            ? "text-yellow-700"
+            : "text-gray-500"
+      }`}
+    >
+      {!current && (
+        <option value="" disabled>Select priority</option>
+      )}
+      {PRIORITY_LEVELS.map((p) => (
+        <option key={p} value={p}>{p}</option>
+      ))}
+    </select>
   );
 }
 
@@ -1184,18 +1262,101 @@ function DSREntryPage({
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  // Out-of-week confirmation dialog state
+  const [showOutOfWeekConfirm, setShowOutOfWeekConfirm] = useState(false);
+
+  /** Core import logic: applies sprint defaults, saves stories, and advances to step 3.
+   *  When `autoDeleteOutOfWeek` is true, stories outside the current week are removed before saving. */
+  const doImport = async (rows: JiraIssue[], autoDeleteOutOfWeek = false) => {
+    setImporting(true);
+    setImportError("");
+    try {
+      const generationMonday = getMondayOf(new Date());
+      const generationFriday = getFridayOf(generationMonday);
+      const fallbackStartDate = isoDate(generationMonday);
+      const fallbackEndDate = isoDate(generationFriday);
+      const fallbackSprintName =
+        `${fmtDateShort(generationMonday)} – ${fmtDateShort(generationFriday)}`;
+
+      let processedRows = rows.map((row) => {
+        if (!isMissingSprintInfo(row)) return row;
+        return {
+          ...row,
+          sprint_name: fallbackSprintName,
+          sprint_start_date: fallbackStartDate,
+          sprint_end_date: fallbackEndDate,
+        };
+      });
+
+      // Auto-delete stories whose sprint is entirely outside the current week
+      if (autoDeleteOutOfWeek) {
+        processedRows = processedRows.filter(
+          (row) => !isSprintOutsideCurrentWeek(row),
+        );
+      }
+
+      const result = await importStories(processedRows);
+      const rowsWithTitles = processedRows.map((row) => {
+        const saved = result.stories.find((s) => s.jira_key === row.jira_key);
+        return saved?.title ? { ...row, title: saved.title } : row;
+      });
+      saveToStorage(rowsWithTitles, parsedTracks);
+      onImportComplete(rowsWithTitles, parsedTracks);
+      setSavedCount(rowsWithTitles.length);
+      setStep(3);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const parseJson = (text: string) => {
     try {
-      const data = JSON.parse(text);
+      // Rovo exports can contain invisible leading characters (for example,
+      // U+200B zero-width space or U+FEFF BOM) before the JSON root value.
+      // These characters are not valid JSON whitespace, so remove them before parsing.
+      const cleanedText = text
+        .replace(/^[\uFEFF\u200B-\u200D\u2060\u00A0]+/, "")
+        .trim();
+
+      if (!cleanedText) {
+        throw new Error("The input is empty.");
+      }
+
+      const data: unknown = JSON.parse(cleanedText);
+      const isTicketArray = Array.isArray(data);
+      const isWrappedPayload =
+        data !== null &&
+        typeof data === "object" &&
+        !Array.isArray(data) &&
+        ["tickets", "issues", "rows", "items", "data"].some((key) =>
+          Array.isArray((data as Record<string, unknown>)[key]),
+        );
+
+      if (!isTicketArray && !isWrappedPayload) {
+        throw new Error(
+          "Expected a plain array of ticket objects or an object containing a tickets array.",
+        );
+      }
+
       const { rows, tracks } = splitImportPayload(data);
+      if (rows.length === 0) {
+        throw new Error("No ticket records were found in the JSON input.");
+      }
+
       setParsedRows(rows);
       setParsedTracks(tracks);
       setParseError("");
       setStep(2);
-    } catch {
+    } catch (err) {
+      console.error("Failed to parse Rovo JSON:", err);
       setParseError(
-        "Invalid JSON. Please check the format and try again.",
+        err instanceof SyntaxError
+          ? "Invalid JSON syntax. Check for missing commas, quotes, or brackets."
+          : err instanceof Error
+            ? err.message
+            : "Unable to read this JSON file. Please check its format and try again.",
       );
     }
   };
@@ -1237,6 +1398,13 @@ function DSREntryPage({
 
   // Stories whose status from the intake JSON can't be mapped to a known story status.
   const unmappedCount = parsedRows.filter((r) => normalizeStatus(r.status) === null).length;
+  
+  // Non-blocking warning count: sprint name and the complete duration are all missing.
+  const missingSprintCount = parsedRows.filter(isMissingSprintInfo).length;
+  // Non-blocking warning count: known sprint dates are entirely outside this week's Monday-Friday range.
+  const outsideCurrentWeekCount = parsedRows.filter(
+    (row) => !isMissingSprintInfo(row) && isSprintOutsideCurrentWeek(row),
+  ).length;
 
   const toggleRow = (i: number) => {
     const s = new Set(selectedRows);
@@ -1315,6 +1483,8 @@ function DSREntryPage({
     { key: "project_key", label: "Project Key", w: "w-24" },
     { key: "project_name", label: "Project Name", w: "w-28" },
     { key: "sprint_name", label: "Sprint Name", w: "w-36" },
+    { key: "sprint_start_date", label: "Sprint Start", w: "w-32" },
+    { key: "sprint_end_date", label: "Sprint End", w: "w-32" },
     { key: "date_assigned", label: "Date Assigned", w: "w-28" },
     { key: "jira_key", label: "Jira Key", w: "w-24" },
     { key: "summary", label: "Summary", w: "w-72" },
@@ -1377,9 +1547,16 @@ function DSREntryPage({
                 value={jsonText}
                 onChange={(e) => setJsonText(e.target.value)}
                 className="flex-1 font-mono text-xs bg-gray-900 text-green-400 rounded-lg p-4 resize-none focus:outline-none focus:ring-2 focus:ring-brand-red/40 border border-gray-700 min-h-64"
-                placeholder={
-                  '{\n  "tracks": [\n    { "name": "Cost", "codes": ["COST"] }\n  ],\n  "tickets": [\n    { "project_key": "COST", "jira_key": "COST-1234", ... }\n  ]\n}\n\nOr a plain array of ticket objects (tracks are inferred from project keys).'
-                }
+                placeholder={`{
+  "tracks": [
+    { "name": "Cost", "codes": ["COST"] }
+  ],
+  "tickets": [
+    { "project_key": "COST", "jira_key": "COST-1234", ... }
+  ]
+}
+
+Or a plain array of ticket objects (tracks are inferred from project keys).`}
               />
               {parseError && (
                 <p className="text-xs text-red-500">
@@ -1549,6 +1726,37 @@ function DSREntryPage({
             </div>
           )}
 
+          {missingSprintCount > 0 && (
+            <div
+              role="status"
+              className="flex items-start gap-2 px-6 py-2.5 bg-amber-50 border-b border-amber-200 text-xs text-amber-800"
+            >
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
+              <span>
+                <strong>
+                  {missingSprintCount} {missingSprintCount === 1 ? "story is" : "stories are"} missing a sprint name and duration.
+                </strong>{" "}
+                This is a warning only. You can still generate the report; default sprint values will be applied automatically.
+              </span>
+            </div>
+          )}
+
+          {outsideCurrentWeekCount > 0 && (
+            <div
+              role="status"
+              className="flex items-start gap-2 px-6 py-2.5 bg-gradient-to-r from-yellow-50 via-yellow-100 to-amber-100 border-b border-yellow-300 text-xs text-yellow-900"
+            >
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-yellow-700" />
+              <span>
+                <strong>
+                  {outsideCurrentWeekCount} {outsideCurrentWeekCount === 1 ? "story has" : "stories have"} a sprint duration outside the current week.
+                </strong>{" "}
+                Check the highlighted sprint start and end dates. You can edit them if they are incorrect.
+                This is a warning only; report generation is still allowed.
+              </span>
+            </div>
+          )}
+
           {/* Table */}
           <div className="flex-1 overflow-auto">
             <table className="w-full text-xs border-collapse">
@@ -1581,15 +1789,23 @@ function DSREntryPage({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row, i) => (
+                {filtered.map((row, i) => {
+                  const isMissingSprint = isMissingSprintInfo(row);
+                  const isOutsideCurrentWeek =
+                    !isMissingSprint && isSprintOutsideCurrentWeek(row);
+                  return (
                   <tr
                     key={i}
                     className={`border-b border-gray-100 hover:bg-brand-red/10/30 ${
                       normalizeStatus(row.status) === null
                         ? "bg-red-50 outline outline-1 -outline-offset-1 outline-red-300"
-                        : selectedRows.has(i)
-                          ? "bg-brand-red/10"
-                          : ""
+                        : isMissingSprint
+                          ? "bg-amber-50/60 outline outline-1 -outline-offset-1 outline-amber-300"
+                          : isOutsideCurrentWeek
+                            ? "bg-gradient-to-r from-yellow-50 via-yellow-100/70 to-amber-100/60 outline outline-1 -outline-offset-1 outline-yellow-400"
+                            : selectedRows.has(i)
+                              ? "bg-brand-red/10"
+                              : ""
                     }`}
                   >
                     <td className="px-3 py-2">
@@ -1636,9 +1852,81 @@ function DSREntryPage({
                       if (c.key === "priority")
                         return (
                           <td key={c.key} className="px-3 py-2">
-                            <PriorityBadge
-                              priority={String(val ?? "")}
+                            <DsrEditablePriority
+                              value={String(val ?? "")}
+                              onSave={(v) => updateCell(i, "priority", v)}
                             />
+                          </td>
+                        );
+                      if (c.key === "sprint_name")
+                        return (
+                          <td key={c.key} className="px-3 py-2 whitespace-nowrap">
+                            {isEditing ? (
+                              <input
+                                autoFocus
+                                defaultValue={String(val ?? "")}
+                                onBlur={(e) => {
+                                  updateCell(i, c.key, e.target.value);
+                                  setEditCell(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    updateCell(i, c.key, e.currentTarget.value);
+                                    setEditCell(null);
+                                  }
+                                }}
+                                className="w-full border border-brand-red/50 rounded px-1 py-0.5 text-xs focus:outline-none bg-white"
+                              />
+                            ) : (
+                              <span
+                                className="block truncate cursor-text text-gray-700"
+                                title={String(val ?? "")}
+                                onClick={() => setEditCell({ row: i, col: c.key })}
+                              >
+                                {val != null && val !== "" ? String(val) : <span className="text-gray-300">—</span>}
+                              </span>
+                            )}
+                            {isMissingSprint && (
+                              <div className="mt-0.5 text-[10px] text-amber-700 font-medium">
+                                ⚠️ No sprint name present (will default)
+                              </div>
+                            )}
+                            {isOutsideCurrentWeek && (
+                              <div className="mt-0.5 text-[10px] text-yellow-800 font-medium">
+                                ⚠️ Sprint is outside the current week
+                              </div>
+                            )}
+                          </td>
+                        );
+                      if (c.key === "sprint_start_date" || c.key === "sprint_end_date")
+                        return (
+                          <td key={c.key} className="px-3 py-2 whitespace-nowrap">
+                            {isEditing ? (
+                              <input
+                                autoFocus
+                                type="date"
+                                defaultValue={String(val ?? "").slice(0, 10)}
+                                onBlur={(e) => {
+                                  updateCell(i, c.key, e.target.value);
+                                  setEditCell(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    updateCell(i, c.key, e.currentTarget.value);
+                                    setEditCell(null);
+                                  }
+                                }}
+                                className="w-full min-w-32 border border-brand-red/50 rounded px-1 py-0.5 text-xs focus:outline-none bg-white"
+                              />
+                            ) : (
+                              <span
+                                className="block truncate cursor-text text-gray-700"
+                                title={String(val ?? "")}
+                                onClick={() => setEditCell({ row: i, col: c.key })}
+                              >
+                                {hasText(val) ? String(val) : <span className="text-gray-300">—</span>}
+                              </span>
+                            )}
                           </td>
                         );
                       if (c.key === "story_points")
@@ -1756,7 +2044,8 @@ function DSREntryPage({
                       );
                     })}
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
             {filtered.length === 0 && (
@@ -1792,24 +2081,17 @@ function DSREntryPage({
               <button
                 disabled={importing || parsedRows.length === 0 || unmappedCount > 0}
                 title={unmappedCount > 0 ? "Select a valid status for the highlighted rows first" : undefined}
-                onClick={async () => {
+                onClick={() => {
                   if (unmappedCount > 0) return;
-                  setImporting(true);
-                  setImportError("");
-                  try {
-                    const result = await importStories(parsedRows);
-                    const rowsWithTitles = parsedRows.map((row) => {
-                      const saved = result.stories.find((s) => s.jira_key === row.jira_key);
-                      return saved?.title ? { ...row, title: saved.title } : row;
-                    });
-                    saveToStorage(rowsWithTitles, parsedTracks);
-                    onImportComplete(rowsWithTitles, parsedTracks);
-                    setSavedCount(rowsWithTitles.length);
-                    setStep(3);
-                  } catch (err) {
-                    setImportError(err instanceof Error ? err.message : "Import failed");
-                  } finally {
-                    setImporting(false);
+                  // Check for stories whose sprint falls outside the current week
+                  const outOfWeekStories = parsedRows.filter(
+                    (r) => !isMissingSprintInfo(r) && isSprintOutsideCurrentWeek(r),
+                  );
+                  if (outOfWeekStories.length > 0) {
+                    // Show confirmation dialog instead of proceeding directly
+                    setShowOutOfWeekConfirm(true);
+                  } else {
+                    void doImport(parsedRows);
                   }
                 }}
                 className="px-5 py-2 bg-brand-orange text-white rounded-lg text-sm font-medium hover:bg-brand-orange-hover disabled:opacity-60 disabled:cursor-not-allowed"
@@ -1823,6 +2105,77 @@ function DSREntryPage({
         </div>
         <RovoRequestSidebar trackCatalog={trackCatalog} onTracksChanged={onTracksChanged} isPmo={isPmo} />
       </div>
+
+      {/* ── Out-of-week confirmation dialog ───────────────────────── */}
+      {showOutOfWeekConfirm && (() => {
+        const outOfWeekRows = parsedRows.filter(
+          (r) => !isMissingSprintInfo(r) && isSprintOutsideCurrentWeek(r),
+        );
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+              {/* Header */}
+              <div className="flex items-start gap-3 px-6 pt-6 pb-4">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-gray-900">
+                    Stories Outside Current Week Detected
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {outOfWeekRows.length} {outOfWeekRows.length === 1 ? "story" : "stories"} found outside the WSR generation week.
+                  </p>
+                </div>
+              </div>
+
+              {/* Story list */}
+              <div className="px-6 pb-3 max-h-44 overflow-y-auto">
+                <ul className="space-y-1.5">
+                  {outOfWeekRows.map((r, idx) => (
+                    <li key={idx} className="flex items-start gap-2 text-xs text-gray-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-1.5">
+                      <span className="font-mono font-semibold text-amber-700 flex-shrink-0">{r.jira_key}</span>
+                      <span className="truncate" title={r.summary}>{r.summary}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Warning message */}
+              <div className="mx-6 mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                <p>
+                  <strong>These stories will be auto-deleted</strong> from the import if you proceed without updating their sprint start/end dates to match the current week.
+                </p>
+                <p className="mt-1.5 text-xs text-amber-700">
+                  To retain them, click <strong>Cancel</strong> and update the sprint dates in the table, then try again.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
+                <button
+                  type="button"
+                  onClick={() => setShowOutOfWeekConfirm(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100"
+                >
+                  Cancel — Update Sprint Dates
+                </button>
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => {
+                    setShowOutOfWeekConfirm(false);
+                    void doImport(parsedRows, true);
+                  }}
+                  className="px-5 py-2 bg-brand-orange text-white rounded-lg text-sm font-medium hover:bg-brand-orange-hover disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {importing ? "Processing…" : `Proceed & Auto-Delete ${outOfWeekRows.length} ${outOfWeekRows.length === 1 ? "Story" : "Stories"}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -2082,14 +2435,14 @@ function SavedTicketsPage({
                         else setSelectedRows(new Set());
                       }} />
                   </th>
-                  {["Jira Key", "Snapshot", "Title", "Track", "Sprint", "Date Assigned", "Status", "Story Points", "% Complete", "Assignee", "Reportee"].map((h) => (
+                  {["Jira Key", "Snapshot", "Title", "Track", "Sprint", "Date Assigned", "Priority", "Status", "Story Points", "% Complete", "Assignee", "Reportee"].map((h) => (
                     <th key={h} className="px-3 py-3 text-left text-gray-500 font-semibold whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading && (
-                  <tr><td colSpan={12} className="px-3 py-12 text-center text-gray-400">Loading stories from database…</td></tr>
+                  <tr><td colSpan={13} className="px-3 py-12 text-center text-gray-400">Loading stories from database…</td></tr>
                 )}
                 {!loading && filtered.map((row, i) => {
                   const pct = completionPct(row.status);
@@ -2128,6 +2481,9 @@ function SavedTicketsPage({
                       <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap text-xs">{row.sprint_name}</td>
                       <td className="px-3 py-2.5 text-gray-600 whitespace-nowrap">{formatAssignedDate(row)}</td>
                       <td className="px-3 py-2.5 whitespace-nowrap">
+                        <PriorityBadge priority={row.priority ?? ""} />
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap">
                         <StatusBadge status={row.status} />
                       </td>
                       <td className="px-3 py-2.5 text-center">
@@ -2149,7 +2505,7 @@ function SavedTicketsPage({
                       </td>
                     </tr>
                     {expanded && (
-                      <InlineSummaryExpansionRow colSpan={12} scrollRef={tableScrollRef} horizontalPad="px-3">
+                      <InlineSummaryExpansionRow colSpan={13} scrollRef={tableScrollRef} horizontalPad="px-3">
                         <InlineSummaryEditor
                           summary={titleSpotlight.displayTitle(row)}
                           contextLabel={row.jira_key}
@@ -2169,7 +2525,7 @@ function SavedTicketsPage({
                   );
                 })}
                 {!loading && filtered.length === 0 && (
-                  <tr><td colSpan={12} className="px-3 py-12 text-center text-gray-400">No tickets match the current filters</td></tr>
+                  <tr><td colSpan={13} className="px-3 py-12 text-center text-gray-400">No tickets match the current filters</td></tr>
                 )}
               </tbody>
             </table>
@@ -3571,17 +3927,17 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
         <table className="w-full text-xs border-collapse">
           <thead className="sticky top-0 bg-gray-50 z-10 border-b border-gray-200">
             <tr>
-              {["Jira Key", "Title", "Date Assigned", "Status", "Comment", "Story Points", "% Complete", "Assignee", "Reportee"].map((h) => (
+              {["Jira Key", "Title", "Date Assigned", "Priority", "Status", "Comment", "Story Points", "% Complete", "Assignee", "Reportee"].map((h) => (
                 <th key={h} className={`px-4 py-3 text-left text-xs font-semibold text-gray-500 whitespace-nowrap ${h === "Comment" ? "w-12 text-center" : ""}`}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={9} className="px-4 py-16 text-center text-gray-400">Loading stories from database…</td></tr>
+              <tr><td colSpan={10} className="px-4 py-16 text-center text-gray-400">Loading stories from database…</td></tr>
             )}
             {!loading && displayRows.length === 0 && (
-              <tr><td colSpan={9} className="px-4 py-16 text-center text-gray-400">No stories in active sprints for this track on the selected DSR date.</td></tr>
+              <tr><td colSpan={10} className="px-4 py-16 text-center text-gray-400">No stories in active sprints for this track on the selected DSR date.</td></tr>
             )}
             {!loading && displayRows.map((row, i) => {
               const record = row as JiraStoryRecord;
@@ -3631,6 +3987,12 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
                       type="date"
                       value={(row.date_assigned ?? row.created_date ?? "").slice(0, 10)}
                       onSave={(v) => handleFieldSave(record, "date_assigned", v)}
+                    />
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <DsrEditablePriority
+                      value={row.priority ?? ""}
+                      onSave={(v) => handleFieldSave(record, "priority", v)}
                     />
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
@@ -3686,7 +4048,7 @@ function ViewDSRPage({ track }: { track: ImportedTrack }) {
                   </td>
                 </tr>
                 {expanded && !record.isDraft && (
-                  <InlineSummaryExpansionRow colSpan={9} scrollRef={tableScrollRef} horizontalPad="px-4">
+                  <InlineSummaryExpansionRow colSpan={10} scrollRef={tableScrollRef} horizontalPad="px-4">
                     <InlineSummaryEditor
                       summary={titleSpotlight.displayTitle(record)}
                       contextLabel={row.jira_key}

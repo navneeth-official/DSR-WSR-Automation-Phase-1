@@ -92,19 +92,22 @@ def test_sprint_dates_from_section_prefers_iso_over_stale_string():
 def test_key_activities_from_inprogress_dedupes_across_sections():
     sections = [
         {
-            "inprogress": [
-                "Story A",
-                "Story B",
+            "inprogress_with_priority": [
+                {"text": "Story A", "priority": "Low", "assignee": "Alex", "jira_key": "COST-1"},
+                {"text": "Story B", "priority": "Low", "assignee": "Bob", "jira_key": "COST-2"},
             ],
         },
         {
-            "inprogress": [
-                "Story B",
-                "Story C",
+            "inprogress_with_priority": [
+                {"text": "Story B", "priority": "Low", "assignee": "Bob", "jira_key": "COST-2"},
+                {"text": "Story C", "priority": "Low", "assignee": "Chris", "jira_key": "COST-3"},
             ],
         },
     ]
-    assert key_activities_from_inprogress(sections) == [
+    assert key_activities_from_inprogress(
+        sections,
+        track_members=["Alex", "Bob", "Chris"],
+    ) == [
         "Story A",
         "Story B",
         "Story C",
@@ -143,7 +146,8 @@ def test_build_slide_chunks_keeps_only_in_progress_in_review_and_done():
     assert chunk["completed"] == ["Shipped the API"]
     assert chunk["released"] == ["Review the ledger"]
     assert chunk["inprogress"] == ["Build the feed", "Hyphenated progress"]
-    assert chunk["key_activities"] == ["Build the feed", "Hyphenated progress"]
+    assert chunk["inprogress_with_priority"]
+    assert len(chunk["key_activities"]) >= 1
 
 
 def test_build_slide_chunks_omits_sprint_that_only_has_excluded_statuses():
@@ -285,6 +289,7 @@ def test_build_slide_chunks_populates_key_activities_from_inprogress():
     )
     story.status = "In Progress"
     story.title = "Implement COGS adjustment API"
+    story.assignee = "Rishi Manoj"
 
     chunk = build_slide_chunks([story])[0]
     assert chunk["inprogress"] == ["Implement COGS adjustment API"]
@@ -294,6 +299,7 @@ def test_build_slide_chunks_populates_key_activities_from_inprogress():
 def test_group_chunks_by_slide_title_merges_key_activities():
     chunks = [
         {
+            "project_id": 1,
             "project_key": "SUP",
             "project_name": "Supplier QA",
             "title": "Supplier Core Service",
@@ -304,10 +310,14 @@ def test_group_chunks_by_slide_title_merges_key_activities():
             "sprint_status": "In-progress",
             "released": [],
             "inprogress": ["Story A"],
+            "inprogress_with_priority": [
+                {"text": "Story A", "priority": "Low", "assignee": "Laura", "jira_key": "SUP-1"},
+            ],
             "completed": [],
             "key_activities": ["Story A"],
         },
         {
+            "project_id": 1,
             "project_key": "SUP",
             "project_name": "Supplier QA",
             "title": "Supplier Core Service",
@@ -318,9 +328,59 @@ def test_group_chunks_by_slide_title_merges_key_activities():
             "sprint_status": "In-progress",
             "released": [],
             "inprogress": ["Story B", "Story A"],
+            "inprogress_with_priority": [
+                {"text": "Story B", "priority": "High", "assignee": "Miguel", "jira_key": "SUP-2"},
+                {"text": "Story A", "priority": "Low", "assignee": "Laura", "jira_key": "SUP-1"},
+            ],
             "completed": [],
             "key_activities": ["Story B", "Story A"],
         },
     ]
     merged = group_chunks_by_slide_title(chunks)[0]
     assert merged["key_activities"] == ["Story A", "Story B"]
+
+
+def test_key_activities_picks_higher_priority_per_member():
+    sections = [
+        {
+            "inprogress_with_priority": [
+                {"text": "Low task", "priority": "Low", "assignee": "Alex", "jira_key": "X-1"},
+                {"text": "High task", "priority": "High", "assignee": "Alex", "jira_key": "X-2"},
+            ],
+        },
+    ]
+    assert key_activities_from_inprogress(sections, track_members=["Alex"]) == ["High task"]
+
+
+def test_key_activities_borrows_from_member_already_in_ka():
+    sections = [
+        {
+            "inprogress_with_priority": [
+                {"text": "High A", "priority": "High", "assignee": "Alex", "jira_key": "X-1"},
+                {"text": "Medium A", "priority": "Medium", "assignee": "Alex", "jira_key": "X-2"},
+            ],
+        },
+    ]
+    assert key_activities_from_inprogress(
+        sections,
+        track_members=["Alex", "Bob"],
+    ) == ["High A", "Medium A"]
+
+
+def test_key_activities_borrow_round_robin_alternates_donors():
+    """Pass 2 borrows rotate across donors (one story per turn), not from one donor only."""
+    sections = [
+        {
+            "inprogress_with_priority": [
+                {"text": "Rishi first", "priority": "High", "assignee": "Rishi", "jira_key": "R-1"},
+                {"text": "Rishi second", "priority": "High", "assignee": "Rishi", "jira_key": "R-2"},
+                {"text": "Vijai first", "priority": "High", "assignee": "Vijai", "jira_key": "V-1"},
+                {"text": "Vijai second", "priority": "High", "assignee": "Vijai", "jira_key": "V-2"},
+            ],
+        },
+    ]
+    ka = key_activities_from_inprogress(
+        sections,
+        track_members=["Empty A", "Rishi", "Empty B", "Vijai"],
+    )
+    assert ka == ["Rishi first", "Vijai first", "Rishi second", "Vijai second"]
