@@ -3,17 +3,19 @@ Build one monthly cadence PowerPoint for selected track(s) from PostgreSQL.
 
 Independent of the weekly WSR pipeline (monthly_report/ + templates/monthly/ only).
 
-Usage:
-    python scripts/generate_monthly_report.py --meeting-date 2026-06-20 --track-name "Cost Core Service" --dry-run
-    python scripts/generate_monthly_report.py --meeting-date 2026-06-20 --track-name "Cost Core Service"
-    python scripts/generate_monthly_report.py --meeting-date 2026-06-20 --track-name "Cost Core Service" --track-name "Pricing Core"
+Usage (preferred — explicit ~1-month window):
+    python scripts/generate_monthly_report.py --start-date 2026-10-01 --end-date 2026-10-31 --track-name COST --dry-run
+    python scripts/generate_monthly_report.py --start-date 2026-10-01 --end-date 2026-10-31 --track-name COST
+    python scripts/generate_monthly_report.py --start-date 2026-09-15 --end-date 2026-10-14 --track-name COST --track-name SM
+
+Legacy: --meeting-date alone still uses that calendar month when start/end are omitted.
 
 One deck per run: Cover, Accomplishments + Delivery Updates for each project matched by
 --track-name, then Thank you (Index slide is removed from the template).
 
-Environment: MSR_MEETING_DATE, MSR_TRACK_NAME (comma-separated), MSR_TEMPLATE_PATH,
-MSR_OUTPUT_DIR, MSR_ACCOMPLISHMENTS (auto|0|1);
-LLM uses AZURE_OPENAI_MODEL (same as story titles)
+Environment: MSR_START_DATE, MSR_END_DATE, MSR_MEETING_DATE, MSR_TRACK_NAME,
+MSR_TEMPLATE_PATH, MSR_OUTPUT_DIR, MSR_ACCOMPLISHMENTS (auto|0|1);
+LLM uses LLM_PROVIDER + provider model (same as story titles; see .env.example)
 """
 
 from __future__ import annotations
@@ -36,8 +38,8 @@ from monthly_report.config import (
 from monthly_report.accomplishments_summarizer import accomplishments_enabled
 from monthly_report.data import (
     list_projects_with_sprints_in_period,
-    month_bounds,
     order_projects,
+    resolve_report_period,
     sprints_in_period,
 )
 from monthly_report.stories import stories_in_period
@@ -55,12 +57,12 @@ def _env(name: str) -> str:
 def _print_sprints(project_label: str, sprints) -> None:
     print(f"\n  [{project_label}]")
     if not sprints:
-        print("    (no sprints with stories in this month)")
+        print("    (no sprints with stories in this period)")
         return
     for number, sprint in enumerate(sprints, start=1):
         schedule = f"{format_schedule_date(sprint.start_date)} - {format_schedule_date(sprint.end_date)}"
         print(f"    Sprint {number}: {sprint.sprint_name}")
-        print(f"      Schedule: {schedule}, {sprint.status}  (DB sprint_status: {sprint.db_status!r})")
+        print(f"      Schedule: {schedule}, {sprint.status}")
         counts = (
             f"TC={sprint.total}  CC={sprint.completed}  RC={sprint.in_review}  "
             f"PC={sprint.in_progress}"
@@ -77,9 +79,22 @@ def main() -> None:
         description="Build one monthly cadence deck for project(s) selected by --track-name."
     )
     parser.add_argument(
+        "--start-date",
+        default=_env("MSR_START_DATE"),
+        help="Report window start (YYYY-MM-DD). Use with --end-date. Also MSR_START_DATE.",
+    )
+    parser.add_argument(
+        "--end-date",
+        default=_env("MSR_END_DATE"),
+        help="Report window end (YYYY-MM-DD). Use with --start-date. Also MSR_END_DATE.",
+    )
+    parser.add_argument(
         "--meeting-date",
-        default=_env("MSR_MEETING_DATE") or date.today().isoformat(),
-        help="Cadence meeting date (YYYY-MM-DD); fills cover {{Date}} and sets the report month",
+        default=_env("MSR_MEETING_DATE"),
+        help=(
+            "Cover {{Date}} (YYYY-MM-DD). Defaults to --end-date when start/end are set; "
+            "if start/end omitted, uses this date's calendar month (legacy)."
+        ),
     )
     parser.add_argument(
         "--track-name",
@@ -105,21 +120,29 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    meeting_date = date.fromisoformat(args.meeting_date)
-    period_start, last_day = month_bounds(meeting_date)
+    try:
+        period_start, period_end, meeting_date = resolve_report_period(
+            start_raw=args.start_date or "",
+            end_raw=args.end_date or "",
+            meeting_raw=args.meeting_date or "",
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     track_names = parse_track_names(args.track_names, _env("MSR_TRACK_NAME"))
 
     with get_engine().connect() as conn:
         projects = order_projects(
-            list_projects_with_sprints_in_period(conn, period_start, last_day),
+            list_projects_with_sprints_in_period(conn, period_start, period_end),
             project_order_keys(),
         )
         sections: list[ProjectSection] = []
         for project in projects:
-            sprint_rows = sprints_in_period(conn, project.project_id, period_start, last_day)
-            metrics = [compute_sprint_metrics(row, meeting_date) for row in sprint_rows]
+            sprint_rows = sprints_in_period(conn, project.project_id, period_start, period_end)
+            metrics = [
+                compute_sprint_metrics(row, period_start, period_end) for row in sprint_rows
+            ]
             title = project_display_name(project.project_key, project.project_name)
-            story_rows = stories_in_period(conn, project.project_id, period_start, last_day)
+            story_rows = stories_in_period(conn, project.project_id, period_start, period_end)
             sections.append(
                 ProjectSection(
                     project_key=project.project_key,
@@ -132,12 +155,12 @@ def main() -> None:
     filtered, track_warnings = filter_sections_by_track_names(sections, track_names)
 
     print(f"Meeting date: {meeting_date}")
-    print(f"Report month: {period_start} to {last_day}")
+    print(f"Report period: {period_start} to {period_end}")
     if track_names:
         print(f"Track filter: {', '.join(track_names)}")
     else:
         print("Track filter: (none — all projects with data)")
-    print(f"Projects in deck: {len(filtered)} of {len(sections)} with data this month")
+    print(f"Projects in deck: {len(filtered)} of {len(sections)} with data in period")
     acc_flag = "off" if args.no_accomplishments else ("on" if accomplishments_enabled() else "off (no LLM)")
     print(f"Accomplishments: {acc_flag}")
     for warning in track_warnings:
@@ -163,13 +186,15 @@ def main() -> None:
     template = resolve_template(args.template or None)
     output = Path(args.output) if args.output else default_output_path(meeting_date)
 
-    period_label = f"{period_start.isoformat()} to {last_day.isoformat()}"
+    period_label = f"{period_start.isoformat()} to {period_end.isoformat()}"
     result = build_monthly_cadence_deck(
         template,
         output,
         filtered,
         period_label=period_label,
         meeting_date=meeting_date,
+        period_start=period_start,
+        period_end=period_end,
         track_names=track_names,
         use_accomplishments=False if args.no_accomplishments else None,
     )

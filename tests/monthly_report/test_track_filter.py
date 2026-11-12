@@ -36,39 +36,48 @@ def test_parse_track_names_splits_and_dedupes():
     assert parse_track_names(None, "Cost Core Service, Cost Core Service") == ["Cost Core Service"]
 
 
-def test_keys_for_cost_core_service():
+def test_keys_match_db_project_key_or_name():
     sections = {
         "COST": _section("COST", "Cost Core Service"),
-        "PRC": _section("PRC", "Pricing Core"),
+        "SM": _section("SM", "Supplier Core"),
     }
-    display = {"COST": "Cost Core Service", "PRC": "Pricing Core"}
-    assert keys_for_track_name(
-        "Cost core service", sections_by_key=sections, display_names=display
-    ) == ["COST"]
+    assert keys_for_track_name("COST", sections_by_key=sections) == ["COST"]
+    assert keys_for_track_name("Cost Core Service", sections_by_key=sections) == ["COST"]
+    assert keys_for_track_name("Supplier Core", sections_by_key=sections) == ["SM"]
+    assert keys_for_track_name("SM", sections_by_key=sections) == ["SM"]
 
 
-def test_supplier_name_matches_both_sup_and_spur():
+def test_same_display_name_matches_multiple_keys():
     sections = {
         "SUP": _section("SUP", "Supplier Core Service"),
         "SPUR": _section("SPUR", "Supplier Core Service"),
     }
-    display = {"SUP": "Supplier Core Service", "SPUR": "Supplier Core Service"}
-    assert keys_for_track_name(
-        "Supplier Core Service", sections_by_key=sections, display_names=display
-    ) == ["SUP", "SPUR"]
+    assert keys_for_track_name("Supplier Core Service", sections_by_key=sections) == ["SUP", "SPUR"]
+
+
+def test_unknown_track_not_pulled_from_static_config():
+    sections = {"COST": _section("COST", "Cost Core Service")}
+    assert keys_for_track_name("PRC", sections_by_key=sections) == []
 
 
 def test_filter_sections_respects_track_order():
     sections = [
-        _section("PRC", "Pricing Core"),
+        _section("PRC", "Pricing"),
         _section("COST", "Cost Core Service"),
         _section("GSS", "Global Sourcing Solution"),
     ]
     filtered, warnings = filter_sections_by_track_names(
-        sections, ["Cost Core Service", "Pricing Core"]
+        sections, ["Cost Core Service", "Pricing"]
     )
     assert warnings == []
     assert [s.project_key for s in filtered] == ["COST", "PRC"]
+
+
+def test_filter_warns_when_track_has_no_data_in_period():
+    sections = [_section("COST", "Cost Core Service")]
+    filtered, warnings = filter_sections_by_track_names(sections, ["COST", "PRC"])
+    assert [s.project_key for s in filtered] == ["COST"]
+    assert any("PRC" in w for w in warnings)
 
 
 def test_index_single_label_when_multiple_tracks():

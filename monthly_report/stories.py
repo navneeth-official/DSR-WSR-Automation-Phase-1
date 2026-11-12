@@ -37,9 +37,10 @@ def stories_in_period(
     rows = conn.execute(
         text(
             """
-            SELECT js.jira_key, js.summary, js.title, js.description, js.status,
+            SELECT js.jira_key, js.summary, js.title, js.description, ss.status_name,
                    js.story_points, s.sprint_name, js.updated_date, js.snapshot_date
             FROM jira_stories js
+            JOIN story_statuses ss ON ss.status_id = js.status_id
             LEFT JOIN sprints s ON s.sprint_id = js.sprint_id
             WHERE js.project_id = :project_id
               AND js.sprint_id IS NOT NULL

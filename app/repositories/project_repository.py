@@ -1,18 +1,14 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.constants.projects import CANONICAL_PROJECT_KEYS
 from app.models.project import Project
 
 
 def normalize_project_key(project_key: str | None, project_name: str) -> str:
-    """Return a stable string key used to look up or create a project row."""
-    name = project_name.strip()
-    if name in CANONICAL_PROJECT_KEYS:
-        return CANONICAL_PROJECT_KEYS[name]
+    """Use the Jira project key when present; otherwise the project name."""
     if project_key and project_key.strip():
         return project_key.strip()
-    return name
+    return project_name.strip()
 
 
 class ProjectRepository:

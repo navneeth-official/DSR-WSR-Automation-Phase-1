@@ -9,7 +9,8 @@ from monthly_report.metrics import (
     story_category,
 )
 
-MEETING = date(2026, 8, 11)
+PERIOD_START = date(2026, 8, 1)
+PERIOD_END = date(2026, 8, 31)
 
 
 def _sprint(statuses, *, db_status="inprogress", start=date(2026, 8, 11), end=date(2026, 8, 24)):
@@ -32,16 +33,32 @@ def test_story_category_normalizes_spelling():
     assert story_category("todo") == "other"
 
 
-def test_sprint_status_uses_db_value_variants():
-    assert sprint_display_status("Ended", date(2026, 9, 1), MEETING) == ENDED
-    assert sprint_display_status("ended", date(2026, 9, 1), MEETING) == ENDED
-    assert sprint_display_status("In-progress", date(2026, 9, 1), MEETING) == IN_PROGRESS
-    assert sprint_display_status("inprogress", date(2026, 9, 1), MEETING) == IN_PROGRESS
+def test_sprint_continuing_past_period_end_is_in_progress():
+    assert (
+        sprint_display_status(date(2026, 8, 20), date(2026, 9, 10), PERIOD_START, PERIOD_END)
+        == IN_PROGRESS
+    )
 
 
-def test_sprint_finished_before_meeting_is_ended_even_if_db_says_inprogress():
-    assert sprint_display_status("inprogress", date(2026, 8, 10), MEETING) == ENDED
-    assert sprint_display_status("inprogress", date(2026, 8, 11), MEETING) == IN_PROGRESS
+def test_sprint_ending_on_or_before_period_end_is_ended():
+    assert (
+        sprint_display_status(date(2026, 8, 1), date(2026, 8, 31), PERIOD_START, PERIOD_END)
+        == ENDED
+    )
+    assert (
+        sprint_display_status(date(2026, 8, 1), date(2026, 8, 10), PERIOD_START, PERIOD_END)
+        == ENDED
+    )
+    assert (
+        sprint_display_status(date(2026, 7, 28), date(2026, 8, 10), PERIOD_START, PERIOD_END)
+        == ENDED
+    )
+
+
+def test_db_sprint_status_is_ignored():
+    # Even if DB says "Ended", a sprint still active on period_end is In-Progress.
+    sprint = _sprint(["Done"], db_status="Ended", start=date(2026, 8, 20), end=date(2026, 9, 5))
+    assert compute_sprint_metrics(sprint, PERIOD_START, PERIOD_END).status == IN_PROGRESS
 
 
 def test_ended_sprint_spill_over_is_in_review_plus_in_progress():
@@ -50,7 +67,7 @@ def test_ended_sprint_spill_over_is_in_review_plus_in_progress():
         start=date(2026, 7, 28),
         end=date(2026, 8, 10),
     )
-    metrics = compute_sprint_metrics(sprint, MEETING)
+    metrics = compute_sprint_metrics(sprint, PERIOD_START, PERIOD_END)
     assert metrics.status == ENDED
     assert metrics.total == 4  # To Do excluded from TC
     assert metrics.completed == 2
@@ -61,7 +78,8 @@ def test_ended_sprint_spill_over_is_in_review_plus_in_progress():
 def test_to_do_stories_are_excluded_from_tc():
     metrics = compute_sprint_metrics(
         _sprint(["To Do", "To Do", "Done", "In Progress"]),
-        MEETING,
+        PERIOD_START,
+        PERIOD_END,
     )
     assert metrics.total == 2
     assert metrics.completed == 1
@@ -70,12 +88,25 @@ def test_to_do_stories_are_excluded_from_tc():
 
 
 def test_ended_sprint_without_unfinished_work_has_zero_spill_over():
-    sprint = _sprint(["Done"], db_status="Ended")
-    assert compute_sprint_metrics(sprint, MEETING).spill_over == 0
+    sprint = _sprint(
+        ["Done"],
+        db_status="inprogress",
+        start=date(2026, 8, 1),
+        end=date(2026, 8, 10),
+    )
+    assert compute_sprint_metrics(sprint, PERIOD_START, PERIOD_END).spill_over == 0
 
 
 def test_in_progress_sprint_has_no_spill_over():
-    metrics = compute_sprint_metrics(_sprint(["Done", "In Review", "In Progress"]), MEETING)
+    metrics = compute_sprint_metrics(
+        _sprint(
+            ["Done", "In Review", "In Progress"],
+            start=date(2026, 8, 20),
+            end=date(2026, 9, 5),
+        ),
+        PERIOD_START,
+        PERIOD_END,
+    )
     assert metrics.status == IN_PROGRESS
     assert (metrics.total, metrics.completed, metrics.in_review, metrics.in_progress) == (3, 1, 1, 1)
     assert metrics.spill_over is None

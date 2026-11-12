@@ -47,6 +47,21 @@ def test_multiple_tokens_in_one_paragraph():
     assert _runs(p) == [("Aug 03\u00a0–Aug 14, Ended ", "0")]
 
 
+def test_placeholder_date_format_overrides_default():
+    from datetime import date
+
+    from monthly_report.tokens import DateValue
+
+    value = DateValue(date(2026, 9, 3), "MMM DD")
+    p = _paragraph(("{{Start date}} / {{Start date | DD-MM-YYYY}} / {{Start date|D MMMM}}", "1"))
+    replace_tokens_in_paragraph(p, {"start_date": value})
+    assert _runs(p) == [("Sept 03 / 03-09-2026 / 3 September", "1")]
+
+
+def test_token_key_ignores_format_spec():
+    assert token_key("Date | DD MMM YYYY") == "date"
+
+
 def test_unknown_tokens_are_left_and_reported():
     p = _paragraph(("{{RCA}} and {{TC}}", "0"))
     assert replace_tokens_in_paragraph(p, {"tc": "4"}) == ["{{RCA}}"]

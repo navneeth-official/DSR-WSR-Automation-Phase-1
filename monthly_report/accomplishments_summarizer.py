@@ -84,6 +84,10 @@ Rules:
 - Write full stakeholder-friendly sentences (what changed and why it matters), not WSR-style 5-word fragments.
 - No Jira keys. No pipe-separated ticket prefixes.
 - Max 220 characters per bullet. Up to 6 completed and 4 in_progress items; omit noise.
+- Use ONLY facts from the provided stories (summary, title, description). Do not invent systems, environments, version numbers, dates, or outcomes not supported by the text.
+- Every bullet must be traceable to at least one input story; if unsure, omit the claim.
+- When several completed stories share a theme (for example security or dependency upgrades), consolidate them but name each distinct application, service, or scope explicitly mentioned across those stories.
+- When four or more completed stories are in the payload, return at least two completed bullets unless they are exact duplicates of the same outcome.
 - Consolidate related stories into one bullet when they tell one outcome.
 """
 
@@ -99,12 +103,20 @@ def _env_int(name: str, default: int) -> int:
 
 
 def summarizer_config_from_env() -> SummarizerConfig:
+    defaults = SummarizerConfig()
     return SummarizerConfig(
-        max_stories=_env_int("MSR_ACCOMPLISHMENTS_MAX_STORIES", 120),
-        max_bullets_completed=_env_int("MSR_ACCOMPLISHMENTS_MAX_COMPLETED", 4),
-        max_bullets_in_progress=_env_int("MSR_ACCOMPLISHMENTS_MAX_IN_PROGRESS", 3),
-        max_chars_per_bullet=_env_int("MSR_ACCOMPLISHMENTS_MAX_CHARS", 140),
-        max_slide_lines=_env_int("MSR_ACCOMPLISHMENTS_SLIDE_LINES", 6),
+        max_stories=_env_int("MSR_ACCOMPLISHMENTS_MAX_STORIES", defaults.max_stories),
+        max_bullets_completed=_env_int(
+            "MSR_ACCOMPLISHMENTS_MAX_COMPLETED", defaults.max_bullets_completed
+        ),
+        max_bullets_in_progress=_env_int(
+            "MSR_ACCOMPLISHMENTS_MAX_IN_PROGRESS", defaults.max_bullets_in_progress
+        ),
+        # Keep in sync with SYSTEM_PROMPT ("Max 220 characters") and SummarizerConfig.
+        max_chars_per_bullet=_env_int(
+            "MSR_ACCOMPLISHMENTS_MAX_CHARS", defaults.max_chars_per_bullet
+        ),
+        max_slide_lines=_env_int("MSR_ACCOMPLISHMENTS_SLIDE_LINES", defaults.max_slide_lines),
     )
 
 
@@ -127,8 +139,8 @@ def accomplishments_model_override() -> str | None:
     """
     Optional deployment override (``MSR_ACCOMPLISHMENTS_MODEL``).
 
-    When unset, accomplishments use the same client and deployment as WSR story
-    title generation (``create_llm_client`` → ``AZURE_OPENAI_MODEL`` / OpenAI default).
+    When unset, accomplishments use the same client and model as WSR story
+    title generation (``create_llm_client`` / ``LLM_MODEL`` / provider default).
     """
     override = os.environ.get("MSR_ACCOMPLISHMENTS_MODEL", "").strip()
     return override or None
@@ -235,15 +247,16 @@ class OpenAIAccomplishmentsSummarizer:
             raise AccomplishmentsSummarizerError(f"No stories to summarize for {project_name!r}")
 
         if self._client_factory is None:
-            from app.services.title_generator import create_llm_client
+            from app.services.llm_client import create_llm_client
 
             self._client_factory = create_llm_client
 
         client, title_model = self._client_factory()
         if client is None or not title_model:
+            from app.services.llm_client import llm_credentials_help
+
             raise AccomplishmentsSummarizerError(
-                "LLM not configured. Set AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY "
-                "and AZURE_OPENAI_MODEL (same as story title generation), or OPENAI_API_KEY."
+                "LLM not configured. " + llm_credentials_help()
             )
 
         model = self._model_override or title_model
@@ -258,13 +271,17 @@ class OpenAIAccomplishmentsSummarizer:
         )
 
         try:
-            response = client.chat.completions.create(
+            from app.services.llm_client import chat_completion_with_retries
+
+            response = chat_completion_with_retries(
+                client,
                 model=model,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_msg},
                 ],
-                max_tokens=500,
+                # Enough room for several ~220-char bullets as JSON (avoid mid-bullet cutoffs).
+                max_tokens=900,
                 temperature=self.config.temperature,
                 response_format={"type": "json_object"},
             )

@@ -6,11 +6,21 @@ import re
 import time
 from typing import TYPE_CHECKING
 
-from openai import AzureOpenAI, OpenAI
 from sqlalchemy.orm import Session
 
-from app.config import get_settings, llm_configured
+from app.config import llm_configured
 from app.constants.ppt_mapping import MAX_TITLE_LENGTH
+from app.services.llm_client import create_llm_client, llm_credentials_help
+
+# Re-export for call sites that import create_llm_client from this module.
+__all__ = (
+    "TitleGenerationError",
+    "create_llm_client",
+    "ensure_story_titles",
+    "fallback_title",
+    "generate_and_assign_title",
+    "generate_title",
+)
 
 if TYPE_CHECKING:
     from app.models.jira_story import JiraStory
@@ -68,30 +78,8 @@ def _clean_model_output(text: str) -> str:
     return cleaned
 
 
-def create_llm_client() -> tuple[OpenAI | AzureOpenAI, str] | tuple[None, None]:
-    """
-    Return (client, model_or_deployment_name).
-    Prefers Azure OpenAI when AZURE_OPENAI_* vars are set.
-    """
-    settings = get_settings()
-
-    if settings.azure_openai_endpoint and settings.azure_openai_api_key:
-        client = AzureOpenAI(
-            azure_endpoint=settings.azure_openai_endpoint.rstrip("/"),
-            api_key=settings.azure_openai_api_key,
-            api_version=settings.azure_openai_api_version,
-        )
-        deployment = settings.azure_openai_model or "gpt-4o-mini"
-        return client, deployment
-
-    if settings.openai_api_key:
-        return OpenAI(api_key=settings.openai_api_key), "gpt-4o-mini"
-
-    return None, None
-
-
 def generate_title(
-    client: OpenAI | AzureOpenAI,
+    client,
     *,
     jira_key: str,
     summary: str,
@@ -99,7 +87,7 @@ def generate_title(
     model: str,
     allow_fallback: bool = True,
 ) -> str:
-    """Call GPT-4o mini for one story title; optional fallback on failure."""
+    """Call the configured LLM for one story title; optional fallback on failure."""
     desc = (description or "")[:DESCRIPTION_MAX_CHARS]
     user_msg = f"jira_key: {jira_key}\nsummary: {summary}\ndescription: {desc}"
 
@@ -118,16 +106,16 @@ def generate_title(
             return _clean_model_output(content)
         if not allow_fallback:
             raise TitleGenerationError(
-                f"GPT returned empty title for {jira_key}"
+                f"LLM returned empty title for {jira_key}"
             )
     except TitleGenerationError:
         raise
     except Exception as exc:
         if not allow_fallback:
             raise TitleGenerationError(
-                f"GPT title failed for {jira_key}: {exc}"
+                f"LLM title failed for {jira_key}: {exc}"
             ) from exc
-        print(f"  Warning: GPT title failed for {jira_key}: {exc}")
+        print(f"  Warning: LLM title failed for {jira_key}: {exc}")
 
     return fallback_title(summary, description)
 
@@ -145,7 +133,7 @@ def generate_and_assign_title(story: JiraStory) -> bool:
     Returns True when a new title was generated, False when an existing title
     was kept or there is no summary/description to generate from.
 
-    Raises TitleGenerationError when LLM credentials are missing or GPT fails.
+    Raises TitleGenerationError when LLM credentials are missing or the call fails.
     """
     if story.title and story.title.strip():
         return False
@@ -155,8 +143,7 @@ def generate_and_assign_title(story: JiraStory) -> bool:
 
     if not llm_configured():
         raise TitleGenerationError(
-            "LLM credentials required for title generation. "
-            "Set AZURE_OPENAI_* or OPENAI_API_KEY in .env"
+            "LLM credentials required for title generation. " + llm_credentials_help()
         )
 
     client, model = create_llm_client()
@@ -188,8 +175,8 @@ def ensure_story_titles(
     """
     if not llm_configured():
         print(
-            "Warning: No LLM credentials — set AZURE_OPENAI_* or OPENAI_API_KEY "
-            "in .env; using fallback titles only."
+            "Warning: No LLM credentials — "
+            f"{llm_credentials_help()} Using fallback titles only."
         )
 
     client, model = create_llm_client()

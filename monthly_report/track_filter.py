@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import TYPE_CHECKING
 
 from rapidfuzz import fuzz
-
-from monthly_report.config import PROJECT_NAMES_FILE
 
 if TYPE_CHECKING:
     from monthly_report.deck import ProjectSection
@@ -41,20 +38,14 @@ def parse_track_names(cli_values: list[str] | None, env_value: str) -> list[str]
     return ordered
 
 
-def _configured_display_names() -> dict[str, str]:
-    if not PROJECT_NAMES_FILE.is_file():
-        return {}
-    return json.loads(PROJECT_NAMES_FILE.read_text(encoding="utf-8"))
-
-
 def keys_for_track_name(
     track_name: str,
     *,
     sections_by_key: dict[str, ProjectSection],
-    display_names: dict[str, str],
 ) -> list[str]:
     """
-    Map one user track name to one or more project keys (e.g. SUP and SPUR share a label).
+    Map one CLI track token to ``project_key`` values using only DB-backed sections
+  (``project_key`` and ``title`` = ``projects.project_name``).
     """
     needle = _normalize(track_name)
     if not needle:
@@ -68,11 +59,6 @@ def keys_for_track_name(
             seen.add(key)
             keys.append(key)
 
-    for key, display in display_names.items():
-        display_norm = _normalize(display)
-        if needle == _normalize(key) or needle == display_norm:
-            add(key)
-
     for section in sections_by_key.values():
         title_norm = _normalize(section.title)
         key_norm = _normalize(section.project_key)
@@ -83,17 +69,13 @@ def keys_for_track_name(
         return keys
 
     candidates: list[tuple[int, str]] = []
-    for key, display in display_names.items():
-        display_norm = _normalize(display)
-        score = max(
-            fuzz.partial_ratio(needle, display_norm),
-            fuzz.partial_ratio(needle, _normalize(key)),
-        )
-        if score >= _MATCH_THRESHOLD:
-            candidates.append((score, key))
     for section in sections_by_key.values():
         title_norm = _normalize(section.title)
-        score = fuzz.partial_ratio(needle, title_norm)
+        key_norm = _normalize(section.project_key)
+        score = max(
+            fuzz.partial_ratio(needle, title_norm),
+            fuzz.partial_ratio(needle, key_norm),
+        )
         if score >= _MATCH_THRESHOLD:
             candidates.append((score, section.project_key))
 
@@ -116,33 +98,22 @@ def filter_sections_by_track_names(
         return list(sections), []
 
     by_key = {section.project_key: section for section in sections}
-    display_names = _configured_display_names()
     selected_keys: list[str] = []
     warnings: list[str] = []
 
     for track in track_names:
-        matched = keys_for_track_name(
-            track,
-            sections_by_key=by_key,
-            display_names=display_names,
-        )
+        matched = keys_for_track_name(track, sections_by_key=by_key)
         if not matched:
-            warnings.append(f"Track name {track!r} did not match any configured project.")
+            warnings.append(
+                f"Track {track!r} did not match any project with data "
+                f"(use DB project_key or project_name from dry-run)."
+            )
             continue
         for key in matched:
             if key not in selected_keys:
                 selected_keys.append(key)
 
-    filtered: list[ProjectSection] = []
-    for key in selected_keys:
-        section = by_key.get(key)
-        if section is None:
-            label = display_names.get(key, key)
-            warnings.append(
-                f"Track {label!r} ({key}) has no sprint/story data in the report month."
-            )
-            continue
-        filtered.append(section)
+    filtered: list[ProjectSection] = [by_key[key] for key in selected_keys]
 
     if track_names and not filtered:
         warnings.append("No projects with data remain after applying --track-name filter.")

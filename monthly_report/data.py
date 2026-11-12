@@ -31,6 +31,50 @@ def month_bounds(day: date) -> tuple[date, date]:
     return day.replace(day=1), day.replace(day=last_day)
 
 
+def resolve_report_period(
+    *,
+    start_raw: str = "",
+    end_raw: str = "",
+    meeting_raw: str = "",
+) -> tuple[date, date, date]:
+    """
+    Return ``(period_start, period_end, meeting_date)``.
+
+    Prefer explicit start/end. If both are omitted, use the calendar month of
+    ``meeting_date`` (legacy). Cover meeting date defaults to ``period_end``
+    when start/end are provided and meeting is omitted.
+    """
+
+    def _parse(raw: str, label: str) -> date:
+        try:
+            return date.fromisoformat(raw.strip())
+        except ValueError as exc:
+            raise ValueError(f"Invalid {label} {raw!r}; use YYYY-MM-DD.") from exc
+
+    start_raw = (start_raw or "").strip()
+    end_raw = (end_raw or "").strip()
+    meeting_raw = (meeting_raw or "").strip()
+
+    if start_raw and end_raw:
+        period_start = _parse(start_raw, "start-date")
+        period_end = _parse(end_raw, "end-date")
+        if period_start > period_end:
+            raise ValueError(
+                f"start-date ({period_start}) must be on or before end-date ({period_end})."
+            )
+        meeting_date = _parse(meeting_raw, "meeting-date") if meeting_raw else period_end
+        return period_start, period_end, meeting_date
+
+    if start_raw or end_raw:
+        raise ValueError("Provide both start-date and end-date (or neither).")
+
+    if not meeting_raw:
+        meeting_raw = date.today().isoformat()
+    meeting_date = _parse(meeting_raw, "meeting-date")
+    period_start, period_end = month_bounds(meeting_date)
+    return period_start, period_end, meeting_date
+
+
 def find_project(conn: Connection, project: str) -> Project:
     """Look up a project by key (PRC) or name (Pricing), case-insensitive."""
     row = conn.execute(
@@ -95,9 +139,10 @@ def sprints_in_period(
         text(
             """
             SELECT s.sprint_id, s.sprint_name, s.sprint_status,
-                   s.sprint_start_date, s.sprint_end_date, js.status
+                   s.sprint_start_date, s.sprint_end_date, ss.status_name
             FROM jira_stories js
             JOIN sprints s ON s.sprint_id = js.sprint_id
+            JOIN story_statuses ss ON ss.status_id = js.status_id
             WHERE js.project_id = :project_id
               AND s.sprint_start_date <= :period_end
               AND s.sprint_end_date >= :period_start

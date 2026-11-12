@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MONTHLY_TEMPLATES_DIR = REPO_ROOT / "templates" / "monthly"
 MONTHLY_OUTPUT_DIR = REPO_ROOT / "output" / "monthly"
-PROJECT_NAMES_FILE = REPO_ROOT / "config" / "monthly_project_names.json"
 PROJECT_ORDER_FILE = REPO_ROOT / "config" / "monthly_project_order.json"
 DEFAULT_INDEX_REFERENCE = (
     REPO_ROOT / "templates" / "G10X H-E-B WSR Haskell Location Pharmacy GSS PAM 01 Aug 2025 Generic Template.pptx"
@@ -90,8 +89,6 @@ def default_output_path(meeting_date) -> Path:
 
 
 def project_display_name(project_key: str, project_name: str) -> str:
-    """Deck-facing project name from config/monthly_project_names.json, else the DB name."""
-    if not PROJECT_NAMES_FILE.is_file():
-        return project_name
-    names: dict[str, str] = json.loads(PROJECT_NAMES_FILE.read_text(encoding="utf-8"))
-    return names.get(project_key) or names.get(project_name) or project_name
+    """Deck-facing project title from the database (``projects.project_name``)."""
+    del project_key
+    return (project_name or "").strip()

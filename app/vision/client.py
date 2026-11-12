@@ -143,8 +143,8 @@ class VisionClient:
         client, deployment = create_llm_client()
         if client is None:
             raise VisionConfigurationError(
-                "LLM not configured. Set AZURE_OPENAI_ENDPOINT + "
-                "AZURE_OPENAI_API_KEY or OPENAI_API_KEY in .env"
+                "LLM not configured. Set LLM_PROVIDER and matching provider "
+                "credentials in .env (see .env.example)."
             )
         # Azure uses deployment name; prefer explicit vision model when set.
         model = self._model_name

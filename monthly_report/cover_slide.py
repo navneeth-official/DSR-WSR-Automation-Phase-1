@@ -1,17 +1,57 @@
-"""Fill the monthly cadence cover slide (track name and meeting date)."""
+"""Deck-wide placeholders: track name, meeting date and report period.
+
+They are filled on every slide that carries them (cover, footers, closing slide),
+so the cover does not have to be the first slide.
+"""
 
 from __future__ import annotations
 
 from datetime import date
 
-from monthly_report.delivery_slide import _MONTH_ABBREVIATIONS
-from monthly_report.tokens import find_tokens, replace_tokens_in_text_frame
+from monthly_report.tokens import (
+    DateValue,
+    TokenValue,
+    format_date,
+    replace_tokens_in_shapes,
+    tokens_in_shapes,
+)
+
+COVER_DATE_FORMAT = "DD MMM YYYY"
+DECK_KEYS = frozenset(
+    {"track_name", "date", "meeting_date", "period_start", "period_end", "report_period"}
+)
 
 
 def format_cover_meeting_date(value: date) -> str:
-    """Display date for ``{{Date}}`` on the cover (e.g. ``20 Jun 2026``)."""
-    month = _MONTH_ABBREVIATIONS[value.month - 1]
-    return f"{value.day:02d} {month} {value.year}"
+    """Default display for ``{{Date}}`` (e.g. ``20 Jun 2026``)."""
+    return format_date(value, COVER_DATE_FORMAT)
+
+
+def deck_values(
+    *,
+    track_name: str,
+    meeting_date: date,
+    period_start: date | None = None,
+    period_end: date | None = None,
+) -> dict[str, TokenValue]:
+    meeting = DateValue(meeting_date, COVER_DATE_FORMAT)
+    values: dict[str, TokenValue] = {
+        "track_name": track_name.strip(),
+        "date": meeting,
+        "meeting_date": meeting,
+    }
+    if period_start is not None and period_end is not None:
+        values["period_start"] = DateValue(period_start, COVER_DATE_FORMAT)
+        values["period_end"] = DateValue(period_end, COVER_DATE_FORMAT)
+        values["report_period"] = (
+            f"{format_cover_meeting_date(period_start)} - {format_cover_meeting_date(period_end)}"
+        )
+    return values
+
+
+def fill_deck_values(prs, values: dict[str, TokenValue]) -> None:
+    for slide in prs.slides:
+        replace_tokens_in_shapes(slide.shapes, values)
 
 
 def fill_cover_slide(
@@ -20,34 +60,10 @@ def fill_cover_slide(
     track_name: str,
     meeting_date: date,
 ) -> list[str]:
-    """
-    Replace ``{{Track Name}}``, ``{{TRACK NAME}}``, and ``{{Date}}`` on the first slide.
-
-    Returns unresolved placeholder strings (e.g. when ``track_name`` is empty).
-    """
-    values = {
-        "track_name": track_name.strip(),
-        "date": format_cover_meeting_date(meeting_date),
-    }
-    leftovers: list[str] = []
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            leftovers.extend(replace_tokens_in_text_frame(shape.text_frame, values))
-        if shape.has_table:
-            for row in shape.table.rows:
-                for cell in row.cells:
-                    if cell.text_frame:
-                        leftovers.extend(replace_tokens_in_text_frame(cell.text_frame, values))
-    return leftovers
+    """Replace deck-wide placeholders on one slide; return the ones left unresolved."""
+    values = deck_values(track_name=track_name, meeting_date=meeting_date)
+    return replace_tokens_in_shapes(slide.shapes, values)
 
 
 def cover_leftover_tokens(slide) -> list[str]:
-    found: list[str] = []
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            found.extend(find_tokens(shape.text_frame.text))
-        if shape.has_table:
-            for row in shape.table.rows:
-                for cell in row.cells:
-                    found.extend(find_tokens(cell.text_frame.text))
-    return found
+    return tokens_in_shapes(slide.shapes)

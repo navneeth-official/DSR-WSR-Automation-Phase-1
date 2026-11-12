@@ -1,124 +1,108 @@
-"""Fill the monthly template Accomplishments table slide."""
+"""Fill the Accomplishments slide.
+
+The slide is whichever one holds ``Statement 1``, ``Statement 2`` ... placeholder
+paragraphs (plain or as ``{{Statement 1}}``), in a text box or a table cell. Each
+bullet takes the formatting of the statement placeholder it replaces; extra bullets
+copy the last placeholder.
+"""
 
 from __future__ import annotations
 
 import re
+from copy import deepcopy
+
+from pptx.oxml.ns import qn
 
 from monthly_report.accomplishments_summarizer import AccomplishmentsSummary
-from monthly_report.text_format import (
-    copy_paragraph_properties,
-    copy_run_properties,
-)
-from monthly_report.tokens import replace_tokens_in_text_frame
+from monthly_report.tokens import iter_text_frames, replace_tokens_in_shapes, tokens_in_shapes
 
-_STATEMENT_PLACEHOLDER_RE = re.compile(r"^statement\s*\d+\s*$", re.I)
+_STATEMENT_PLACEHOLDER_RE = re.compile(r"^\s*(\{\{\s*)?statement\s*\d+\s*(\}\})?\s*$", re.I)
 _IN_PROGRESS_PREFIX_RE = re.compile(r"^\(in progress\)\s*", re.I)
 
 
+def _statement_paragraphs(text_frame) -> list:
+    return [p for p in text_frame.paragraphs if _STATEMENT_PLACEHOLDER_RE.match(p.text or "")]
+
+
+def _statement_text_frame(slide):
+    for text_frame in iter_text_frames(slide.shapes):
+        if _statement_paragraphs(text_frame):
+            return text_frame
+    return None
+
+
 def is_accomplishments_slide(slide) -> bool:
-    for shape in slide.shapes:
-        if not getattr(shape, "has_table", False) or not shape.has_table:
-            continue
-        header = shape.table.cell(0, 0).text.lower()
-        if "accomplishment" in header:
-            return True
-    return False
+    return _statement_text_frame(slide) is not None
 
 
 def find_accomplishments_slide(prs):
     for slide in prs.slides:
         if is_accomplishments_slide(slide):
             return slide
-    raise ValueError("No Accomplishments slide (table with Accomplishments header) in template")
-
-
-def _accomplishments_body_cell(slide):
-    for shape in slide.shapes:
-        if not shape.has_table:
-            continue
-        table = shape.table
-        if len(table.rows) < 2:
-            continue
-        if "accomplishment" in table.cell(0, 0).text.lower():
-            return table.cell(1, 0)
-    return None
-
-
-def _set_paragraph_text_keep_format(paragraph, text: str) -> None:
-    if paragraph.runs:
-        paragraph.runs[0].text = text
-        for run in paragraph.runs[1:]:
-            run.text = ""
-    else:
-        paragraph.add_run().text = text
-
-
-def _append_bullet_paragraph(text_frame, prototype_paragraph):
-    paragraph = text_frame.add_paragraph()
-    copy_paragraph_properties(paragraph, prototype_paragraph)
-    if prototype_paragraph.runs:
-        run = paragraph.add_run()
-        copy_run_properties(run, prototype_paragraph.runs[0])
-        run.text = ""
-    return paragraph
-
-
-def _uniform_body_paragraph_styles(text_frame) -> None:
-    """Every filled bullet uses the same font/size as the first template line."""
-    paragraphs = [p for p in text_frame.paragraphs if p.text.strip()]
-    if not paragraphs:
-        return
-    prototype = paragraphs[0]
-    if not prototype.runs:
-        return
-    proto_run = prototype.runs[0]
-    for paragraph in paragraphs:
-        copy_paragraph_properties(paragraph, prototype)
-        if not paragraph.runs:
-            run = paragraph.add_run()
-            copy_run_properties(run, proto_run)
-            continue
-        copy_run_properties(paragraph.runs[0], proto_run)
-        for extra in paragraph.runs[1:]:
-            copy_run_properties(extra, proto_run)
+    raise ValueError(
+        "No Accomplishments slide in template (needs 'Statement 1', 'Statement 2' ... placeholders)"
+    )
 
 
 def _normalize_display_line(line: str) -> str:
     cleaned = _IN_PROGRESS_PREFIX_RE.sub("", (line or "").strip())
-    cleaned = cleaned.strip("-• ")
-    return cleaned
+    return cleaned.strip("-• ")
 
 
-def _write_accomplishment_bullets(cell, lines: list[str]) -> None:
-    """
-    Write one bullet per paragraph, preserving template bullet color/indent (Statement 1…3).
-    """
-    display = [_normalize_display_line(line) for line in lines if _normalize_display_line(line)]
-    tf = cell.text_frame
-    if not display:
-        for paragraph in tf.paragraphs:
-            _set_paragraph_text_keep_format(paragraph, "")
+def _first_text_run(p_elem):
+    runs = p_elem.findall(qn("a:r"))
+    return next((r for r in runs if (r.findtext(qn("a:t")) or "").strip()), runs[0] if runs else None)
+
+
+def _write_paragraph(p_elem, text: str, style_p) -> None:
+    """Make ``p_elem`` one run of ``text`` styled like ``style_p``'s placeholder run."""
+    style_run = _first_text_run(style_p)
+    style_ppr = style_p.find(qn("a:pPr"))
+
+    for child in list(p_elem):
+        if child.tag in (qn("a:r"), qn("a:br"), qn("a:fld"), qn("a:pPr")):
+            p_elem.remove(child)
+    if style_ppr is not None:
+        p_elem.insert(0, deepcopy(style_ppr))
+
+    run = deepcopy(style_run) if style_run is not None else p_elem.makeelement(qn("a:r"), {})
+    for child in list(run):
+        if child.tag != qn("a:rPr"):
+            run.remove(child)
+    t = run.makeelement(qn("a:t"), {})
+    t.text = text
+    run.append(t)
+    end = p_elem.find(qn("a:endParaRPr"))
+    if end is not None:
+        end.addprevious(run)
+    else:
+        p_elem.append(run)
+
+
+def _write_accomplishment_bullets(text_frame, lines: list[str]) -> None:
+    display = [d for d in (_normalize_display_line(line) for line in lines) if d]
+    placeholders = [p._p for p in _statement_paragraphs(text_frame)]
+    if not placeholders:
         return
+    styles = [deepcopy(p) for p in placeholders]
 
-    if not tf.paragraphs:
-        tf.text = display[0]
-        for line in display[1:]:
-            tf.add_paragraph().text = line
-        return
+    last = placeholders[0]
+    for index, text in enumerate(display):
+        style = styles[min(index, len(styles) - 1)]
+        if index < len(placeholders):
+            target = placeholders[index]
+        else:
+            target = deepcopy(style)
+            last.addnext(target)
+        _write_paragraph(target, text, style)
+        last = target
 
-    prototype = tf.paragraphs[0]
-    while len(tf.paragraphs) < len(display):
-        _append_bullet_paragraph(tf, prototype)
-
-    for index, line in enumerate(display):
-        _set_paragraph_text_keep_format(tf.paragraphs[index], line)
-
-    for index in range(len(display), len(tf.paragraphs)):
-        text = tf.paragraphs[index].text.strip()
-        if _STATEMENT_PLACEHOLDER_RE.match(text) or not text:
-            _set_paragraph_text_keep_format(tf.paragraphs[index], "")
-
-    _uniform_body_paragraph_styles(tf)
+    unused = placeholders[len(display):]
+    for p_elem in unused:
+        if len(text_frame._txBody.findall(qn("a:p"))) > 1:
+            p_elem.getparent().remove(p_elem)
+        else:
+            _write_paragraph(p_elem, "", styles[0])
 
 
 def fill_accomplishments_slide(
@@ -128,31 +112,16 @@ def fill_accomplishments_slide(
     summary: AccomplishmentsSummary,
     max_lines: int = 6,
 ) -> None:
-    """Replace project tokens and write cadence-style accomplishment bullets."""
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            replace_tokens_in_text_frame(shape.text_frame, {"project_name": project_title})
-
-    cell = _accomplishments_body_cell(slide)
-    if cell is None:
-        raise ValueError("Accomplishments body cell not found")
-
-    lines = summary.slide_lines(max_lines=max_lines)
-    _write_accomplishment_bullets(cell, lines)
+    """Replace slide placeholders and write one accomplishment per statement placeholder."""
+    replace_tokens_in_shapes(slide.shapes, {"project_name": project_title})
+    text_frame = _statement_text_frame(slide)
+    if text_frame is None:
+        raise ValueError("Accomplishments statement placeholders not found")
+    _write_accomplishment_bullets(text_frame, summary.slide_lines(max_lines=max_lines))
 
 
 def leftover_accomplishments_tokens(slide) -> list[str]:
-    from monthly_report.tokens import find_tokens
-
-    found: list[str] = []
-    for shape in slide.shapes:
-        if shape.has_text_frame:
-            found.extend(find_tokens(shape.text_frame.text))
-        if shape.has_table:
-            for row in shape.table.rows:
-                for cell in row.cells:
-                    found.extend(find_tokens(cell.text_frame.text))
-    return found
+    return tokens_in_shapes(slide.shapes)
 
 
 def strip_statement_placeholders(text: str) -> bool:

@@ -12,6 +12,11 @@ from monthly_report.config import resolve_template
 from monthly_report.deck import ProjectSection, build_monthly_cadence_deck
 from monthly_report.metrics import ENDED, SprintMetrics
 from monthly_report.stories import StoryRecord
+from monthly_report.tokens import iter_text_frames
+
+
+def _all_text(slide):
+    return [tf.text for tf in iter_text_frames(slide.shapes)]
 
 try:
     TEMPLATE = resolve_template()
@@ -91,15 +96,14 @@ def test_accomplishments_slide_before_delivery(tmp_path):
     prs = Presentation(str(out))
     acc_slide = prs.slides[1]
     del_slide = prs.slides[2]
-    assert is_accomplishments_slide(acc_slide)
-    body = ""
-    for shape in acc_slide.shapes:
-        if shape.has_table and "accomplishment" in shape.table.cell(0, 0).text.lower():
-            body = shape.table.cell(1, 0).text
+    # Statement placeholders are consumed by the fill.
+    assert not is_accomplishments_slide(acc_slide)
+    body = "\n".join(_all_text(acc_slide))
     assert "Completed work for Pricing Core" in body
     assert "Ongoing validation" in body
     assert "(In progress)" not in body
-    assert del_slide.shapes.title.text == "Delivery Updates: Pricing Core"
+    assert "Statement" not in body
+    assert "Pricing Core" in del_slide.shapes.title.text
 
 
 def test_delivery_not_filled_on_accomplishments_when_second_project_skips_acc(tmp_path):
@@ -140,8 +144,8 @@ def test_delivery_not_filled_on_accomplishments_when_second_project_skips_acc(tm
     assert len(result.accomplishments_slide_numbers) == 1
 
     prs = Presentation(str(out))
-    for slide in prs.slides:
-        if is_accomplishments_slide(slide):
-            for shape in slide.shapes:
-                if shape.has_chart:
-                    pytest.fail("Accomplishments slide must not be filled as delivery (chart present)")
+    for number in result.accomplishments_slide_numbers:
+        slide = prs.slides[number - 1]
+        if any(shape.has_chart for shape in slide.shapes):
+            pytest.fail("Accomplishments slide must not be filled as delivery (chart present)")
+    assert not set(result.accomplishments_slide_numbers) & set(result.delivery_slide_numbers)

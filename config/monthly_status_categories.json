@@ -1,0 +1,5 @@
+{
+  "completed": ["Done", "Closed", "Resolved"],
+  "in_review": ["In Review"],
+  "in_progress": ["In Progress", "In Development"]
+}

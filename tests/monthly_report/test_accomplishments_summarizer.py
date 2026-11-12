@@ -72,3 +72,30 @@ def test_validate_summary_rejects_empty():
         assert False, "expected error"
     except AccomplishmentsSummarizerError:
         pass
+
+
+def test_env_config_keeps_prompt_char_budget(monkeypatch):
+    from monthly_report.accomplishments_summarizer import summarizer_config_from_env
+
+    monkeypatch.delenv("MSR_ACCOMPLISHMENTS_MAX_CHARS", raising=False)
+    monkeypatch.delenv("MSR_ACCOMPLISHMENTS_MAX_COMPLETED", raising=False)
+    monkeypatch.delenv("MSR_ACCOMPLISHMENTS_MAX_IN_PROGRESS", raising=False)
+    config = summarizer_config_from_env()
+    assert config.max_chars_per_bullet == 220
+    assert config.max_bullets_completed == 6
+    assert config.max_bullets_in_progress == 4
+
+
+def test_clean_bullet_does_not_cut_mid_sentence_under_budget():
+    from monthly_report.accomplishments_summarizer import _clean_bullet
+
+    text = (
+        "Resolved replica set security vulnerabilities across patrx-api, "
+        "comp-data-sync, patrv-api, and pat-produce-batch by upgrading direct "
+        "and transitive dependencies"
+    )
+    assert len(text) < 220
+    assert _clean_bullet(text, 220) == text
+    truncated = _clean_bullet(text, 140)
+    assert truncated.endswith("...")
+    assert len(truncated) <= 140

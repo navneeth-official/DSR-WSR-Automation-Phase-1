@@ -1,16 +1,22 @@
-"""Build one monthly cadence deck containing every project in report order."""
+"""Build one monthly cadence deck containing every project in report order.
+
+Generated content slides (Accomplishments + Delivery Updates per project) take the
+place of the template's prototype slides: slides before the first prototype and
+after the last one (cover, closing slides, ...) stay where the template put them.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 import tempfile
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 from typing import Literal
 
 from pptx import Presentation
 
-from monthly_report.cover_slide import fill_cover_slide
+from monthly_report.cover_slide import DECK_KEYS, deck_values, fill_deck_values
 from monthly_report.accomplishments_slide import (
     fill_accomplishments_slide,
     find_accomplishments_slide,
@@ -37,8 +43,15 @@ from monthly_report.pptx_com import (
     materialize_slides_via_com,
     save_presentation,
 )
-from monthly_report.slide_ops import duplicate_slide, move_slide_before, remove_slide, slide_index
+from monthly_report.slide_ops import (
+    duplicate_slide,
+    move_slide,
+    move_slide_before,
+    remove_slide,
+    slide_index,
+)
 from monthly_report.stories import StoryRecord
+from monthly_report.tokens import TOKEN_RE, token_key, tokens_in_shapes
 
 
 @dataclass(frozen=True)
@@ -69,12 +82,31 @@ class _SlideJob:
     page_sprints: tuple[SprintMetrics, ...] = ()
 
 
-def _find_thank_you_slide(prs):
-    for slide in prs.slides:
-        for shape in slide.shapes:
-            if shape.has_text_frame and "thank you" in shape.text_frame.text.lower():
-                return slide
-    return prs.slides[-1]
+@dataclass(frozen=True)
+class _Region:
+    """Template slides kept before (head) and after (tail) the generated content."""
+
+    head: int
+    tail: int
+
+    def anchor_index(self, prs) -> int:
+        return len(prs.slides) - self.tail
+
+    def anchor(self, prs):
+        index = self.anchor_index(prs)
+        return prs.slides[index] if index < len(prs.slides) else None
+
+
+def _content_region(prs, prototypes: list) -> _Region:
+    indices = [slide_index(prs, slide) for slide in prototypes if slide is not None]
+    return _Region(head=min(indices), tail=len(prs.slides) - 1 - max(indices))
+
+
+def _move_before_anchor(prs, slide, anchor) -> None:
+    if anchor is None:
+        move_slide(prs, slide, len(prs.slides) - 1)
+    else:
+        move_slide_before(prs, slide, anchor)
 
 
 def _strip_index_slide(prs) -> None:
@@ -82,14 +114,6 @@ def _strip_index_slide(prs) -> None:
     index_idx = find_index_slide_index(prs)
     if index_idx is not None:
         remove_slide(prs, prs.slides[index_idx])
-
-
-def _content_region_start(prs) -> int:
-    """First slide index after cover (and index, if still present)."""
-    index_idx = find_index_slide_index(prs)
-    if index_idx is not None:
-        return index_idx + 1
-    return 1
 
 
 def _remove_accomplishments_slides(prs) -> None:
@@ -128,14 +152,11 @@ def _source_indices_for_jobs(
     acc_index: int,
     del_index: int,
 ) -> list[int]:
-    indices: list[int] = []
-    for job in jobs:
-        indices.append(acc_index if job.kind == "accomplishments" else del_index)
-    return indices
+    return [acc_index if job.kind == "accomplishments" else del_index for job in jobs]
 
 
 def _is_fillable_delivery_slide(slide) -> bool:
-    """True when the slide has the chart and both sprint table prototypes."""
+    """True when the slide has the chart and sprint table placeholders."""
     if is_accomplishments_slide(slide):
         return False
     if not is_delivery_slide(slide):
@@ -147,13 +168,12 @@ def _is_fillable_delivery_slide(slide) -> bool:
     return True
 
 
-def _content_slides_before_thank(prs, thank_index: int) -> tuple[list, list, list]:
-    """Classify slides before Thank you into accomplishments, delivery, and unknown."""
-    start = _content_region_start(prs)
+def _content_slides(prs, region: _Region) -> tuple[list, list, list]:
+    """Classify the generated-content region into accomplishments, delivery, and unknown."""
     acc_slides: list = []
     delivery_slides: list = []
     unknown: list = []
-    for idx in range(start, thank_index):
+    for idx in range(region.head, region.anchor_index(prs)):
         slide = prs.slides[idx]
         if is_accomplishments_slide(slide):
             acc_slides.append(slide)
@@ -167,7 +187,7 @@ def _content_slides_before_thank(prs, thank_index: int) -> tuple[list, list, lis
 def _match_slides_to_jobs(
     prs,
     jobs: list[_SlideJob],
-    thank_index: int,
+    region: _Region,
     warnings: list[str],
 ) -> list[tuple[object, _SlideJob]]:
     """
@@ -176,10 +196,10 @@ def _match_slides_to_jobs(
     The template keeps an Accomplishments slide even when the first project has no
     summary; positional zip would assign that slide to a Delivery job.
     """
-    acc_pool, del_pool, unknown = _content_slides_before_thank(prs, thank_index)
+    acc_pool, del_pool, unknown = _content_slides(prs, region)
     if unknown:
         warnings.append(
-            f"Skipped {len(unknown)} unrecognized slide(s) before Thank you when matching jobs."
+            f"Skipped {len(unknown)} unrecognized slide(s) in the content region when matching jobs."
         )
 
     need_acc = sum(1 for job in jobs if job.kind == "accomplishments")
@@ -192,7 +212,6 @@ def _match_slides_to_jobs(
 
     for slide in acc_pool[need_acc:] + del_pool[need_del:]:
         remove_slide(prs, slide)
-        thank_index -= 1
 
     acc_i = 0
     del_i = 0
@@ -214,7 +233,7 @@ def _build_ordered_slides_python_pptx(
     acc_proto,
     delivery_proto,
     delivery_template,
-    thank_you,
+    anchor,
 ) -> list[tuple[object, _SlideJob]]:
     """Create or reuse slides in job order without PowerPoint COM."""
     acc_used = False
@@ -238,7 +257,7 @@ def _build_ordered_slides_python_pptx(
                 slide = duplicate_delivery_slide(prs, delivery_proto, delivery_template)
             ordered.append((slide, job))
     for slide, _job in ordered:
-        move_slide_before(prs, slide, thank_you)
+        _move_before_anchor(prs, slide, anchor)
     return ordered
 
 
@@ -263,6 +282,19 @@ def _resolve_section_summary(
         return None
 
 
+def _collect_leftovers(prs, ignore_keys: frozenset[str]) -> dict[int, list[str]]:
+    leftovers: dict[int, list[str]] = {}
+    for number, slide in enumerate(prs.slides, start=1):
+        found = [
+            token
+            for token in tokens_in_shapes(slide.shapes)
+            if token_key(TOKEN_RE.fullmatch(token).group(1)) not in ignore_keys
+        ]
+        if found:
+            leftovers[number] = found
+    return leftovers
+
+
 def build_monthly_cadence_deck(
     template_path: Path,
     output_path: Path,
@@ -271,12 +303,15 @@ def build_monthly_cadence_deck(
     index_reference_path: Path | None = None,
     period_label: str = "",
     meeting_date: date | None = None,
+    period_start: date | None = None,
+    period_end: date | None = None,
     track_names: list[str] | None = None,
     use_accomplishments: bool | None = None,
     summarizer: AccomplishmentsSummarizer | None = None,
 ) -> MonthlyDeckResult:
     """
-    One deck: Cover, optional Accomplishments + Delivery Updates per project, then Thank you.
+    One deck: template head slides, Accomplishments + Delivery Updates per project,
+    then the template's trailing slides.
     """
     prs = Presentation(str(template_path))
     result = MonthlyDeckResult(output_path=output_path)
@@ -284,16 +319,18 @@ def build_monthly_cadence_deck(
     track_names = list(track_names or [])
     cover_label = track_names[0].strip() if track_names else ""
     if meeting_date is not None:
-        cover_leftovers = fill_cover_slide(
-            prs.slides[0],
-            track_name=cover_label,
-            meeting_date=meeting_date,
+        fill_deck_values(
+            prs,
+            deck_values(
+                track_name=cover_label,
+                meeting_date=meeting_date,
+                period_start=period_start,
+                period_end=period_end,
+            ),
         )
-        if cover_leftovers:
-            result.leftover_tokens[1] = cover_leftovers
         if not cover_label:
             result.warnings.append(
-                "Cover slide track name not set; pass --track-name or MSR_TRACK_NAME."
+                "Track name placeholder not set; pass --track-name or MSR_TRACK_NAME."
             )
 
     _strip_index_slide(prs)
@@ -312,14 +349,14 @@ def build_monthly_cadence_deck(
             include_acc = False
             result.warnings.append(
                 "Accomplishments slides skipped: enable MSR_ACCOMPLISHMENTS=1 and configure "
-                "AZURE_OPENAI_* or OPENAI_API_KEY (optional MSR_ACCOMPLISHMENTS_MODEL)."
+                "LLM_PROVIDER + provider key(s) (optional MSR_ACCOMPLISHMENTS_MODEL)."
             )
     else:
         _remove_accomplishments_slides(prs)
 
     delivery_proto = find_delivery_slide(prs)
     delivery_template = analyze_delivery_slide(delivery_proto)
-    chart_theme_colors = delivery_template.series_theme_colors
+    series_styles = delivery_template.series_styles
     per_slide = delivery_template.sprints_per_slide
 
     enriched: list[ProjectSection] = []
@@ -356,8 +393,8 @@ def build_monthly_cadence_deck(
         include_accomplishments=include_acc,
     )
 
-    thank_you = _find_thank_you_slide(prs)
     acc_proto = find_accomplishments_slide(prs) if include_acc else None
+    region = _content_region(prs, [acc_proto, delivery_proto])
 
     if not jobs:
         remove_slide(prs, delivery_proto)
@@ -367,44 +404,39 @@ def build_monthly_cadence_deck(
     else:
         acc_index = slide_index(prs, acc_proto) if acc_proto is not None else -1
         del_index = slide_index(prs, delivery_proto)
-        thank_index = slide_index(prs, thank_you)
 
         # python-pptx slide/chart copy corrupts large decks; prefer PowerPoint COM.
         ordered_slides: list[tuple[object, _SlideJob]] | None = None
         if len(jobs) > 1 and com_available():
             with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as tmp:
                 staging = Path(tmp.name)
+            prepared = BytesIO()
+            prs.save(prepared)
             try:
-                prs.save(str(staging))
+                staging.write_bytes(prepared.getvalue())
                 try:
                     materialize_slides_via_com(
                         staging,
-                        thank_index,
+                        region.anchor_index(prs),
                         _source_indices_for_jobs(jobs, acc_index, del_index),
                     )
                     prs = Presentation(str(staging))
-                    thank_you = _find_thank_you_slide(prs)
                     if include_acc:
                         acc_proto = find_accomplishments_slide(prs)
                     delivery_proto = find_delivery_slide(prs)
                     delivery_template = analyze_delivery_slide(delivery_proto)
-                    chart_theme_colors = delivery_template.series_theme_colors
-                    thank_index = slide_index(prs, thank_you)
-                    ordered_slides = _match_slides_to_jobs(
-                        prs, jobs, thank_index, result.warnings
-                    )
-                    thank_you = _find_thank_you_slide(prs)
+                    series_styles = delivery_template.series_styles
+                    ordered_slides = _match_slides_to_jobs(prs, jobs, region, result.warnings)
+                    anchor = region.anchor(prs)
                     for slide, _job in ordered_slides:
-                        move_slide_before(prs, slide, thank_you)
+                        _move_before_anchor(prs, slide, anchor)
                 except Exception as exc:
-                    prs = Presentation(str(template_path))
-                    _strip_index_slide(prs)
-                    thank_you = _find_thank_you_slide(prs)
+                    prs = Presentation(BytesIO(prepared.getvalue()))
                     if include_acc:
                         acc_proto = find_accomplishments_slide(prs)
                     delivery_proto = find_delivery_slide(prs)
                     delivery_template = analyze_delivery_slide(delivery_proto)
-                    chart_theme_colors = delivery_template.series_theme_colors
+                    series_styles = delivery_template.series_styles
                     ordered_slides = None
                     result.warnings.append(
                         f"PowerPoint slide duplication failed ({exc}); "
@@ -425,10 +457,9 @@ def build_monthly_cadence_deck(
                 acc_proto=acc_proto,
                 delivery_proto=delivery_proto,
                 delivery_template=delivery_template,
-                thank_you=thank_you,
+                anchor=region.anchor(prs),
             )
 
-        thank_you = _find_thank_you_slide(prs)
         for slide, job in ordered_slides:
             target_index = slide_index(prs, slide)
 
@@ -449,20 +480,20 @@ def build_monthly_cadence_deck(
                 raise ValueError(
                     f"Cannot fill Delivery Updates for {job.section.title!r} on slide "
                     f"{target_index + 1}: slide is not a valid delivery template "
-                    f"(missing chart or sprint tables). "
+                    f"(missing chart or sprint table placeholders). "
                     f"If this persists, retry with --no-accomplishments and check warnings."
                 )
-            slide_number = target_index + 1
-            result.delivery_slide_numbers.append(slide_number)
-            leftovers = fill_delivery_slide(
+            result.delivery_slide_numbers.append(target_index + 1)
+            fill_delivery_slide(
                 slide,
                 continuation_title(job.section.title, job.page_idx),
                 list(job.page_sprints),
-                series_theme_colors=chart_theme_colors,
+                series_styles=series_styles,
             )
-            if leftovers:
-                result.leftover_tokens[slide_number] = leftovers
 
+    result.leftover_tokens = _collect_leftovers(
+        prs, frozenset() if meeting_date is not None else DECK_KEYS
+    )
     save_warning = save_presentation(output_path, prs)
     if save_warning:
         result.warnings.append(save_warning)

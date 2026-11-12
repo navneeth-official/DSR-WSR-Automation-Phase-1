@@ -136,7 +136,7 @@ def evaluate_deck_format(
     client, model = create_llm_client()
     if client is None:
         raise RuntimeError(
-            "Azure OpenAI not configured. Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY in .env"
+            "LLM not configured. Set LLM_PROVIDER and the matching provider credentials in .env"
         )
 
     user_prompt = _build_user_prompt(rulebook, deck_data)
