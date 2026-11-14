@@ -20,6 +20,11 @@ from app.layout.geometry_debug import (
 )
 
 from app.paths import GEOMETRY_DEBUG_LOG, SCRIPTS_DIR
+from app.services.ppt_shape_utils import (
+    has_highlights_table,
+    service_suffix_from_title,
+    slide_title_text,
+)
 from app.services.wsr_template import resolve_wsr_template
 
 
@@ -70,13 +75,20 @@ def _is_contd_title(slide_title: str) -> bool:
 
 
 def _slide_title(slide: Slide) -> str:
-    for shape in slide.shapes:
-        if shape.has_text_frame and getattr(shape, "shape_id", None) == 2:
-            return shape.text_frame.text.strip()
-    return ""
+    return slide_title_text(slide)
 
 
 def _g10x_slide_index(uds, g10x_prs, service: str) -> int:
+    """Match reference slide by service name in the active template, then legacy map."""
+    needle = service.lower().strip()
+    for i, slide in enumerate(g10x_prs.slides):
+        if not has_highlights_table(slide):
+            continue
+        suffix = service_suffix_from_title(slide_title_text(slide)).lower()
+        if not suffix:
+            continue
+        if suffix == needle or needle in suffix or suffix in needle:
+            return i
     return uds.G10X_LAYOUT_BY_TITLE.get(service, 2)
 
 

@@ -16,7 +16,13 @@ DEFAULT_INDEX_REFERENCE = (
     REPO_ROOT / "templates" / "G10X H-E-B WSR Haskell Location Pharmacy GSS PAM 01 Aug 2025 Generic Template.pptx"
 )
 
+_BACKEND_ENV = (
+    REPO_ROOT / "DSR_WSR_AUTOMATION-Backend" / "backend" / "Jira-Automation" / ".env"
+)
+
 load_dotenv(REPO_ROOT / ".env")
+if not os.environ.get("DATABASE_URL", "").strip():
+    load_dotenv(_BACKEND_ENV)
 
 
 def _env(name: str) -> str:
@@ -31,7 +37,18 @@ def _repo_path(value: str | Path) -> Path:
 def database_url() -> str:
     url = _env("DATABASE_URL")
     if not url:
-        raise RuntimeError("DATABASE_URL is not set (see .env.example)")
+        user = _env("POSTGRES_USER") or "postgres"
+        password = _env("POSTGRES_PASSWORD")
+        host = _env("POSTGRES_HOST") or "localhost"
+        port = _env("POSTGRES_PORT") or "5432"
+        db = _env("POSTGRES_DB") or "dsr_wsr_db"
+        if password:
+            url = f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL is not set. Add REPO_ROOT/.env, or configure "
+            "DSR_WSR_AUTOMATION-Backend/backend/Jira-Automation/.env (see .env.example)."
+        )
     return url
 
 

@@ -17,7 +17,10 @@ from app.constants.ppt_bullets import (
 from app.services.ppt_shape_utils import (
     get_highlights_shape,
     get_key_activities_shape,
+    has_highlights_table,
+    is_delivery_slide_title,
     paragraph_text,
+    slide_title_text,
 )
 from app.services.template_profile import ParagraphRoles, ServiceProfile, TemplateProfile
 from app.services.template_block_spec import TemplateBlockSpec
@@ -226,11 +229,27 @@ def _apply_g10x_paragraph_spacing(p_elem, is_story: bool = False) -> None:
 
 
 def find_canonical_style_slide_index(template_prs, profile: TemplateProfile | None = None) -> int:
+    """Pick a delivery slide with a Highlights table for style cloning (template-driven)."""
     if profile is not None:
+        for svc in profile.services.values():
+            idx = svc.main_slide_index
+            if idx is None or idx < 0 or idx >= len(template_prs.slides):
+                continue
+            if has_highlights_table(template_prs.slides[idx]):
+                return idx
         for name, svc in profile.services.items():
             if "cost core" in name.lower():
-                return svc.main_slide_index
-    return 2 if len(template_prs.slides) > 2 else 0
+                idx = svc.main_slide_index
+                if idx is not None and 0 <= idx < len(template_prs.slides):
+                    return idx
+    for i, slide in enumerate(template_prs.slides):
+        title = slide_title_text(slide)
+        if has_highlights_table(slide) and is_delivery_slide_title(title):
+            return i
+    for i, slide in enumerate(template_prs.slides):
+        if has_highlights_table(slide):
+            return i
+    return 0 if template_prs.slides else 0
 
 
 def get_canonical_style_cell(template_prs, profile: TemplateProfile | None = None):

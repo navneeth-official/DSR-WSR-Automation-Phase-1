@@ -34,13 +34,13 @@ def slide_title_text(slide) -> str:
         if text.lower() == "index":
             return "Index"
     for shape in iter_all_shapes(slide.shapes):
-        if shape.shape_id == 2 and shape.has_text_frame:
-            return shape_text(shape)
-    for shape in iter_all_shapes(slide.shapes):
         if not shape.has_text_frame:
             continue
         text = normalize_title_text(shape_text(shape))
         if "delivery status" in text.lower():
+            return shape_text(shape)
+    for shape in iter_all_shapes(slide.shapes):
+        if shape.shape_id == 2 and shape.has_text_frame:
             return shape_text(shape)
     return ""
 
@@ -150,11 +150,15 @@ def get_key_activities_shape(slide):
 
 def find_title_shape(slide):
     for shape in iter_all_shapes(slide.shapes):
+        if not shape.has_text_frame:
+            continue
+        text = normalize_title_text(shape_text(shape))
+        if "delivery status" in text.lower():
+            return shape
+    for shape in iter_all_shapes(slide.shapes):
         if shape.shape_id == 2 and shape.has_text_frame:
             return shape
     for shape in iter_all_shapes(slide.shapes):
-        if shape.has_text_frame:
-            text = normalize_title_text(shape_text(shape))
-            if "delivery status" in text.lower():
-                return shape
+        if shape.has_text_frame and normalize_title_text(shape_text(shape)):
+            return shape
     raise RuntimeError("Title shape not found on slide")
