@@ -122,6 +122,49 @@ def test_normalize_bucket_story_title_tokens() -> None:
     assert normalize_token_name("In-Review Count") == "in_review_count"
 
 
+def test_sprint_line_generic_count_disambiguation() -> None:
+    template = (
+        "Stories (Total – {Count}, Completed –{Count}, "
+        "In-review –{Count}, In-progress – {Count})"
+    )
+    section = {
+        "sprint_name": "S1",
+        "sprint_status": "Open",
+        "completed": ["a"],
+        "released": ["b", "c"],
+        "inprogress": ["d"],
+    }
+    ctx = PlaceholderContext.from_section(section)
+    result = substitute_text(template, ctx)
+    assert "Total – 4" in result or "Total – {Count}" not in result
+    compact = result.replace(" ", "")
+    assert "Completed–1" in compact
+    assert "In-review–2" in compact
+    assert "In-progress–1" in compact
+
+
+def test_sprint_line_repeated_count_disambiguation() -> None:
+    ctx = PlaceholderContext.from_section(
+        {
+            "sprint_name": "S1",
+            "sprint_status": "Ended",
+            "completed": ["a"],
+            "released": ["b", "b"],
+            "inprogress": ["c", "c", "c"],
+        }
+    )
+    line = (
+        "Stories (Total – {Count}, Completed –{Count}, In-review –{Count}, "
+        "In-progress – {Count})"
+    )
+    out = substitute_text(line, ctx)
+    assert "Total – 6" in out or "Total – 6," in out
+    assert "Completed –1" in out or "Completed – 1" in out
+    assert "In-review –2" in out or "In-review – 2" in out
+    assert "In-progress –3" in out or "In-progress – 3" in out
+    assert "– 6" not in out.split("Completed", 1)[1].split("In-review")[0]
+
+
 def test_resolve_bucket_specific_count_tokens() -> None:
     section = {
         "sprint_name": "S1",
@@ -134,6 +177,33 @@ def test_resolve_bucket_specific_count_tokens() -> None:
     assert substitute_text("completed: {Completed Count}", ctx) == "completed: 2"
     assert substitute_text("review: {In-Review Count}", ctx) == "review: 1"
     assert substitute_text("active: {In-Progress Count}", ctx) == "active: 0"
+    assert substitute_text("sum: {Total Count}", ctx) == "sum: 3"
+
+
+def test_sprint_line_named_count_placeholders() -> None:
+    """Generic template sprint summary line uses the same count tokens as category headers."""
+    section = {
+        "sprint_name": "Dusty Hand Galaxy - Sprint 1",
+        "sprint_status": "In-progress",
+        "sprint_start_date": "2026-10-14",
+        "sprint_end_date": "2026-10-28",
+        "completed": ["a"],
+        "released": ["b", "c", "d", "e", "f"],
+        "inprogress": ["g", "h", "i"],
+    }
+    ctx = PlaceholderContext.from_section(section)
+    template = (
+        "Sprint – {Sprint Name}, {Status} ({From Date} – {To Date}) Stories "
+        "(Total – {Total Count}, Completed – {Completed Count}, "
+        "In-review – {In-Review Count}, In-progress – {In-Progress Count})"
+    )
+    out = substitute_text(template, ctx)
+    assert "Total – 9" in out or "Total – 9," in out
+    assert "Completed – 1" in out or "Completed – 1," in out
+    assert "In-review – 5" in out or "In-review – 5," in out
+    assert "In-progress – 3" in out or "In-progress – 3" in out
+    assert "14 Oct 2026" in out
+    assert "28 Oct 2026" in out
 
 
 def test_resolve_bucket_specific_story_title() -> None:

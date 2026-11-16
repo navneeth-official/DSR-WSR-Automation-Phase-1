@@ -11,14 +11,18 @@ from pptx import Presentation
 
 from app.wsr_engine.continuation_engine import ensure_continuation_slides, ensure_ka_only_contd_slide
 from app.wsr_engine.content_parser import section_display_content
+from app.services.template_block_spec import extract_block_spec_for_slide
+from app.services.template_content_filler import substitute_title_placeholders
 from app.wsr_engine.formatter import (
     clear_ka_on_project_slides,
     fill_highlights_on_slide,
-    section_templates_from_profile,
 )
-from app.wsr_engine.hl_ka_normalizer import normalize_deck_hl_ka_layouts
 from app.wsr_engine.ka_layout import finalize_project_hl_ka
-from app.wsr_engine.index_updater import rebuild_index_from_projects, reflow_index_slide
+from app.wsr_engine.index_updater import (
+    fill_index_slide_track_placeholders,
+    rebuild_index_from_projects,
+    reflow_index_slide,
+)
 from app.wsr_engine.models import BuildReport, ProjectContent, ProjectMap, TemplateModel
 from app.wsr_engine.overflow_engine import (
     build_overflow_profile,
@@ -51,7 +55,6 @@ class PptWriter:
             self.prs = Presentation(str(self.template_path))
 
         self.template_prs = Presentation(str(self.template_path))
-        normalize_deck_hl_ka_layouts(self.prs, template_model.profile)
         return self.prs
 
     def apply_project(
@@ -78,21 +81,29 @@ class PptWriter:
 
         main_slide = self.prs.slides[main_idx]
         template_slide = self.template_prs.slides[service.main_slide_index]
-        section_tmpl = section_templates_from_profile(template_slide, service)
+        block_spec = service.block_spec
+        if block_spec is None:
+            block_spec = extract_block_spec_for_slide(template_slide)
 
         layout_profile = build_overflow_profile(
             self.template_prs, template_slide, service, profile
         )
         overflow = plan_overflow(
-            content, layout_profile, main_cap=main_slide_capacity(layout_profile)
+            content,
+            layout_profile,
+            main_cap=main_slide_capacity(layout_profile),
+            block_spec=block_spec,
+            track_name=content.title,
         )
 
         try:
             fill_highlights_on_slide(
                 main_slide,
-                section_tmpl,
+                block_spec,
                 overflow.main_sections,
+                track_name=content.title,
             )
+            substitute_title_placeholders(main_slide, content.title)
             report.inserted_projects.append(project_map.project_name)
         except ValueError as exc:
             report.warnings.append(f"Highlights fill failed for {project_map.project_name}: {exc}")
@@ -116,7 +127,8 @@ class PptWriter:
                 service,
                 service.main_slide_index,
                 title_format,
-                section_tmpl,
+                block_spec,
+                track_name=content.title,
             )
             report.continuations_created += created
         elif overflow.ka_contd_only:
@@ -160,6 +172,14 @@ class PptWriter:
         content_labels: dict[str, str] | None = None,
     ) -> int:
         assert self.prs is not None
+        updated = fill_index_slide_track_placeholders(
+            self.prs,
+            projects,
+            content_labels,
+            self.template_model.index_layout,
+        )
+        if updated:
+            return updated
         if skeleton_mode:
             return rebuild_index_from_projects(
                 self.prs,

@@ -3,9 +3,8 @@ Generate PPT delivery-status content from PostgreSQL and optionally build the de
 
 Usage:
     python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13
-    python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --save-titles
+    python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --template "templates\\Your Template.pptx"
     python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --json-only
-    python scripts/generate_ppt_content.py --start-date 2026-06-09 --end-date 2026-06-13 --regenerate-titles
 """
 
 from __future__ import annotations
@@ -136,7 +135,11 @@ def main() -> None:
         type=str,
         choices=("v1", "v2"),
         default="v2",
-        help="Deck builder: v1=legacy update_delivery_status.py, v2=template-agnostic engine",
+        help=(
+            "Deck builder (default: v2). "
+            "v2=WSR engine (placeholder/template-driven fill on this branch); "
+            "v1=legacy update_delivery_status.py. Omit this flag to use v2."
+        ),
     )
     parser.add_argument(
         "--save-titles",

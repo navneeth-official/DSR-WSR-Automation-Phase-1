@@ -128,7 +128,9 @@ def ensure_continuation_slides(
     service: ServiceProfile,
     template_slide_idx: int,
     title_format: TitleFormat,
-    section_tmpl: dict,
+    block_spec,
+    *,
+    track_name: str = "",
 ) -> tuple[list[int], int]:
     if not continuation_chains:
         return [], 0
@@ -167,7 +169,12 @@ def ensure_continuation_slides(
         ref_title = find_title_shape(main_slide)
         set_contd_title(contd_slide, project_name, ref_title, title_format)
 
-        fill_contd_highlights_on_slide(contd_slide, section_tmpl, continuation_chains[chain_idx])
+        fill_contd_highlights_on_slide(
+            contd_slide,
+            block_spec,
+            continuation_chains[chain_idx],
+            track_name=track_name,
+        )
         remove_ka_from_slide(contd_slide)
         sync_header_pictures_from_reference(
             template_prs.slides[template_slide_idx], contd_slide

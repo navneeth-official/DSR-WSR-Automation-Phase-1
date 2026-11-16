@@ -11,7 +11,9 @@ from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.oxml.ns import qn
 from rapidfuzz import fuzz
 
-from app.services.ppt_shape_utils import normalize_title_text, slide_title_text, iter_all_shapes
+from app.services.ppt_shape_utils import normalize_title_text, paragraph_text, slide_title_text, iter_all_shapes
+from app.services.template_placeholders import PlaceholderContext, find_placeholder_tokens, normalize_token_name
+from app.services.template_run_substitution import substitute_placeholders_in_shape_text_frame
 from app.wsr_engine.index_layout import INDEX_ENTRY_RULES, IndexLayout, discover_index_layout
 from app.wsr_engine.models import ProjectMap
 
@@ -439,6 +441,119 @@ def _collect_rebuild_entries(
         seen_targets.add(target_idx)
         entries.append((target_idx, slot.search_title))
     return entries
+
+
+def _cell_text_blob(cell) -> str:
+    return normalize_title_text(cell.text_frame.text)
+
+
+def _cell_has_track_name_placeholder(cell) -> bool:
+    tx_body = cell.text_frame._txBody
+    for p_elem in tx_body.findall(qn("a:p")):
+        text = paragraph_text(p_elem)
+        for raw in find_placeholder_tokens(text):
+            if normalize_token_name(raw) == "track_name":
+                return True
+    return False
+
+
+def fill_index_slide_track_placeholders(
+    prs: Presentation,
+    projects: list[ProjectMap],
+    content_labels: dict[str, str] | None = None,
+    layout: IndexLayout | None = None,
+) -> int:
+    """
+    Fill index cells that use ``{Track Name}`` / ``{Slide Number}`` placeholders.
+
+    Cells are paired with delivery tracks in ``main_slide_index`` order. Each
+    cell is updated in place (no clear/repack); hyperlinks target the track's
+    main delivery slide.
+    """
+    index_idx = _find_index_slide_index(prs)
+    if index_idx is None:
+        logger.warning("Index slide not found")
+        return 0
+
+    index_slide = prs.slides[index_idx]
+    table = _find_index_table(index_slide)
+    if table is None:
+        logger.warning("Index table not found")
+        return 0
+
+    labels = content_labels or {}
+    if layout is None or not layout.slots:
+        layout = discover_index_layout(table)
+
+    updated = 0
+    linked: set[int] = set()
+    delivery_slots = [slot for slot in layout.slots if slot.is_delivery]
+    if delivery_slots:
+        for slot in delivery_slots:
+            cell = _index_cell_at(table, slot.row, slot.col)
+            if cell is None or not _cell_has_index_content(cell):
+                continue
+            project = _match_project_for_index(projects, slot.search_title)
+            if project is None:
+                logger.warning(
+                    "Index slot %r: no matching delivery track in this run",
+                    slot.search_title,
+                )
+                continue
+            display = labels.get(project.project_name, project.project_name)
+            ctx = PlaceholderContext(
+                track_name=display,
+                slide_number=f"{project.main_slide_index + 1:02d}",
+            )
+            if _cell_has_track_name_placeholder(cell):
+                substitute_placeholders_in_shape_text_frame(cell, ctx)
+            if _update_cell_index_entry(cell, index_slide, project.main_slide_index, prs):
+                updated += 1
+            linked.add(_cell_identity(cell))
+    else:
+        track_cells = [
+            cell
+            for cell in _index_table_cells_row_major(table)
+            if _cell_has_track_name_placeholder(cell)
+        ]
+        projects_sorted = sorted(projects, key=lambda p: p.main_slide_index)
+        for cell, project in zip(track_cells, projects_sorted):
+            display = labels.get(project.project_name, project.project_name)
+            ctx = PlaceholderContext(
+                track_name=display,
+                slide_number=f"{project.main_slide_index + 1:02d}",
+            )
+            if substitute_placeholders_in_shape_text_frame(cell, ctx):
+                updated += 1
+            if _update_cell_index_entry(cell, index_slide, project.main_slide_index, prs):
+                updated += 1
+            linked.add(_cell_identity(cell))
+        if len(track_cells) != len(projects_sorted):
+            logger.warning(
+                "Index track placeholders: %d cells, %d projects (row-major fallback)",
+                len(track_cells),
+                len(projects_sorted),
+            )
+    for cell in _index_table_cells_row_major(table):
+        if _cell_identity(cell) in linked:
+            continue
+        if not _cell_has_index_content(cell):
+            continue
+        if _cell_has_track_name_placeholder(cell):
+            continue
+        target = _resolve_index_target(prs, _cell_text_blob(cell), projects)
+        if target is None:
+            continue
+        if _update_cell_index_entry(cell, index_slide, target, prs):
+            updated += 1
+
+    if linked:
+        logger.info(
+            "Index placeholder fill: %d track cell(s), %d update(s)",
+            len(linked),
+            updated,
+        )
+    return updated
 
 
 def rebuild_index_from_projects(

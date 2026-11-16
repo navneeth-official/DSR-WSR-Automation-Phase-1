@@ -15,13 +15,16 @@ from app.services.template_profile import ServiceProfile, TemplateProfile
 from app.wsr_engine.hl_ka_normalizer import find_standalone_reference_slide
 from app.wsr_engine.models import OverflowPlan, ProjectContent
 from app.wsr_engine.content_parser import section_display_content
+from app.services.template_block_spec import TemplateBlockSpec
+from app.services.template_placeholders import PlaceholderContext
+from app.services.template_run_substitution import paragraph_plain_text, substitute_text
 from app.wsr_engine.placeholder_locator import count_template_paragraph_slots
 
 STORY_BUCKET_ORDER = ("completed", "released", "inprogress")
 MAX_KA_BOTTOM_EMU = 5747107
-# Universal HL-only line budget (main + contd slides without KA tab).
+# Absolute ceiling so a mis-measured template cannot pack an unbounded slide.
 UNIVERSAL_HL_ONLY_CAP = 26
-# When HL line count is below this, HL and KA share the main slide.
+# Legacy alias — prefer template-derived ``with_ka_cap`` / ``full_main_cap``.
 HL_KA_SAME_SLIDE_MAX = 20
 _CHARS_PER_LINE = {0: 92, 1: 72, 7: 80}
 _DEFAULT_CHARS = 85
@@ -35,22 +38,72 @@ def _text_visual_lines(text: str, level: int = 1) -> int:
     return max(1, (len(t) + chars - 1) // chars)
 
 
-def _section_paragraph_count(section: dict, display: bool = False) -> int:
+def _section_paragraph_count(
+    section: dict,
+    display: bool = False,
+    *,
+    block_spec: TemplateBlockSpec | None = None,
+    track_name: str = "",
+) -> int:
     """Wrap-aware slot estimate — counts visual lines, not just paragraph slots."""
     continued = section.get("continued_section")
     omit = set(section.get("omit_category_headers") or [])
+    if block_spec is not None and block_spec.ordered_paragraphs:
+        n = 0
+        bucket_items = {
+            bucket: section.get(bucket) or section.get(f"{bucket}_items") or []
+            for bucket in STORY_BUCKET_ORDER
+        }
+        pending_blanks = 0
+        for para in block_spec.ordered_paragraphs:
+            if para.role in ("sprint_line", "current_week", "static") and continued:
+                continue
+            if para.role == "blank":
+                pending_blanks += 1
+                continue
+            if para.role.startswith("category_"):
+                bucket = para.role.replace("category_", "", 1)
+                if bucket in omit or not bucket_items.get(bucket):
+                    pending_blanks = 0
+                    continue
+                n += pending_blanks + 1
+                pending_blanks = 0
+                continue
+            if para.role == "story_bullet":
+                bucket = para.bucket or "completed"
+                items = bucket_items.get(bucket) or []
+                for item in items:
+                    n += 1
+                    if display:
+                        n += max(0, _text_visual_lines(str(item), level=1) - 1)
+                pending_blanks = 0
+                continue
+            if para.role == "sprint_line" and display and block_spec.sprint_line is not None:
+                template_text = paragraph_plain_text(block_spec.sprint_line.element)
+                ctx = PlaceholderContext.from_section(section, track_name=track_name)
+                sprint = substitute_text(template_text, ctx)
+                if sprint.strip():
+                    n += _text_visual_lines(sprint, level=0)
+            else:
+                n += pending_blanks + 1
+            pending_blanks = 0
+        return n
+
     n = 0 if continued else 2
     if not continued:
         if display:
-            sprint = (section.get("sprint_bold") or "") + (section.get("sprint_light") or "")
+            if section.get("sprint_name"):
+                sprint = f"{section.get('sprint_name', '')} {section.get('sprint_status', '')}"
+            else:
+                sprint = (section.get("sprint_bold") or "") + (section.get("sprint_light") or "")
         else:
             sprint = ""
         if sprint.strip():
             n += _text_visual_lines(sprint, level=0)
-        n += 1  # current week line
+        n += 1
     for bucket in STORY_BUCKET_ORDER:
         if display:
-            items = section.get(f"{bucket}_items") or []
+            items = section.get(f"{bucket}_items") or section.get(bucket) or []
         else:
             items = section.get(bucket) or []
         if not items:
@@ -58,7 +111,7 @@ def _section_paragraph_count(section: dict, display: bool = False) -> int:
         if bucket not in omit:
             n += 1
         for item in items:
-            n += _text_visual_lines(item, level=1)
+            n += _text_visual_lines(str(item), level=1)
     return n
 
 
@@ -193,26 +246,53 @@ def main_slide_capacity(layout_profile: dict) -> int:
 
 
 def hl_only_slide_capacity(layout_profile: dict) -> int:
-    """HL-only capacity for main/contd slides when overflow continues on later slides."""
-    return UNIVERSAL_HL_ONLY_CAP
+    """HL-only capacity from the template slide geometry (capped by universal ceiling)."""
+    budgets = get_hl_budgets(layout_profile)
+    template_based = max(
+        int(budgets.get("full_main_cap") or 0),
+        int(budgets.get("template_cap") or 0),
+        1,
+    )
+    return min(template_based, UNIVERSAL_HL_ONLY_CAP)
 
 
-def _total_display_lines(sections: list[dict]) -> int:
+def _total_display_lines(
+    sections: list[dict],
+    *,
+    block_spec: TemplateBlockSpec | None = None,
+    track_name: str = "",
+) -> int:
     """Wrap-aware HL line count including one-line gaps between sprints."""
     total = 0
     for idx, section in enumerate(sections):
         gap = 1 if idx > 0 else 0
-        total += gap + _section_paragraph_count(section, display=True)
+        total += gap + _section_paragraph_count(
+            section,
+            display=True,
+            block_spec=block_spec,
+            track_name=track_name,
+        )
     return total
 
 
-def _pack_sections_to_cap(sections: list[dict], cap: int) -> tuple[list[dict], list[dict]]:
+def _pack_sections_to_cap(
+    sections: list[dict],
+    cap: int,
+    *,
+    block_spec: TemplateBlockSpec | None = None,
+    track_name: str = "",
+) -> tuple[list[dict], list[dict]]:
     packed: list[dict] = []
     used = 0
     idx = 0
     while idx < len(sections):
         section = sections[idx]
-        sec_count = _section_paragraph_count(section, display=True)
+        sec_count = _section_paragraph_count(
+            section,
+            display=True,
+            block_spec=block_spec,
+            track_name=track_name,
+        )
         gap = 1 if packed else 0
         if used + gap + sec_count <= cap:
             packed.append(dict(section))
@@ -230,44 +310,62 @@ def plan_overflow(
     profile: dict,
     main_cap: int | None = None,
     hl_only_cap: int | None = None,
+    *,
+    block_spec: TemplateBlockSpec | None = None,
+    track_name: str = "",
 ) -> OverflowPlan:
+    """
+    Pack sprint sections using the template's measured HL budgets.
+
+    - ``with_ka_cap`` / ``main_cap``: content that can share the main slide with KA
+    - ``full_main_cap`` / ``hl_only_cap``: content that fits when HL expands (KA off-slide)
+    - Above ``hl_only_cap``: split whole sprints onto continuation slides
+    """
     budgets = get_hl_budgets(profile)
     if main_cap is not None:
         hl_ka_cap = main_cap
     else:
         hl_ka_cap = (
-            budgets["with_ka_cap"] if profile.get("ref_ka") else UNIVERSAL_HL_ONLY_CAP
+            budgets["with_ka_cap"] if profile.get("ref_ka") else budgets["full_main_cap"]
         )
     if hl_only_cap is None:
-        hl_only_cap = UNIVERSAL_HL_ONLY_CAP
+        hl_only_cap = hl_only_slide_capacity(profile)
+    # Never pack denser than the HL-only template budget on a single slide.
+    hl_only_cap = max(1, min(int(hl_only_cap), UNIVERSAL_HL_ONLY_CAP))
+    hl_ka_cap = max(1, min(int(hl_ka_cap), hl_only_cap))
 
     display_sections = [section_display_content(s) for s in project.sections]
-    total = _total_display_lines(display_sections)
+    track = track_name or project.title
+    total = _total_display_lines(
+        display_sections,
+        block_spec=block_spec,
+        track_name=track,
+    )
     if total <= 0:
         total = sum(
             1 + len(s.completed) + len(s.released) + len(s.inprogress)
             for s in project.sections
         )
 
-    if profile.get("ref_ka"):
-        if total < HL_KA_SAME_SLIDE_MAX:
-            if hl_ka_fits_on_main_slide(profile, total):
-                return OverflowPlan(
-                    main_sections=display_sections,
-                    continuation_chains=[],
-                    ka_on_main=True,
-                )
+    if profile.get("ref_ka") and total <= hl_ka_cap:
+        if hl_ka_fits_on_main_slide(profile, total):
             return OverflowPlan(
                 main_sections=display_sections,
                 continuation_chains=[],
-                ka_contd_only=True,
+                ka_on_main=True,
             )
-        if HL_KA_SAME_SLIDE_MAX < total < UNIVERSAL_HL_ONLY_CAP:
-            return OverflowPlan(
-                main_sections=display_sections,
-                continuation_chains=[],
-                ka_contd_only=True,
-            )
+        return OverflowPlan(
+            main_sections=display_sections,
+            continuation_chains=[],
+            ka_contd_only=True,
+        )
+
+    if profile.get("ref_ka") and total <= hl_only_cap:
+        return OverflowPlan(
+            main_sections=display_sections,
+            continuation_chains=[],
+            ka_contd_only=True,
+        )
 
     if total <= hl_ka_cap:
         return OverflowPlan(main_sections=display_sections, continuation_chains=[])
@@ -277,13 +375,23 @@ def plan_overflow(
     used = 0
 
     for idx, section in enumerate(display_sections):
-        sec_count = _section_paragraph_count(section, display=True)
+        sec_count = _section_paragraph_count(
+            section,
+            display=True,
+            block_spec=block_spec,
+            track_name=track,
+        )
         gap = 1 if main_sections else 0
         if used + gap + sec_count <= hl_only_cap:
             main_sections.append(dict(section))
             used += gap + sec_count
             continue
-        contd_sections.extend(dict(s) for s in display_sections[idx:])
+        if not main_sections:
+            # Keep an oversized sprint whole on main; overflow later sprints.
+            main_sections.append(dict(section))
+            contd_sections.extend(dict(s) for s in display_sections[idx + 1 :])
+        else:
+            contd_sections.extend(dict(s) for s in display_sections[idx:])
         break
 
     if not contd_sections:
@@ -292,7 +400,12 @@ def plan_overflow(
     continuation_chains: list[list[dict]] = []
     remaining = contd_sections
     while remaining:
-        packed, rest = _pack_sections_to_cap(remaining, hl_only_cap)
+        packed, rest = _pack_sections_to_cap(
+            remaining,
+            hl_only_cap,
+            block_spec=block_spec,
+            track_name=track,
+        )
         if packed:
             continuation_chains.append(packed)
         elif rest:

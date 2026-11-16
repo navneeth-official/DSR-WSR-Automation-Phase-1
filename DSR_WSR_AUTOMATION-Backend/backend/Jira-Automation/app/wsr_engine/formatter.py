@@ -764,18 +764,26 @@ def clear_ka_on_project_slides(prs, project_name: str, template_slide=None, serv
 
 def fill_highlights_on_slide(
     slide,
-    section_tmpl: dict,
+    block_spec,
     sections: list[dict],
+    *,
+    track_name: str = "",
 ) -> None:
+    from app.services.template_content_filler import fill_highlights_cell
+
     cell = highlights_content_cell(slide)
-    populate_highlights_cell(cell, section_tmpl, {"sections": sections})
+    fill_highlights_cell(cell, block_spec, sections, track_name=track_name)
 
 
 def fill_contd_highlights_on_slide(
     slide,
-    section_tmpl: dict,
+    block_spec,
     sections: list[dict],
+    *,
+    track_name: str = "",
 ) -> None:
+    from app.services.template_content_filler import fill_highlights_contd_cell
+
     prepare_contd_slide_for_highlights(slide)
     cell = highlights_content_cell(slide)
-    populate_highlights_contd_cell(cell, section_tmpl, {"sections": sections})
+    fill_highlights_contd_cell(cell, block_spec, sections, track_name=track_name)

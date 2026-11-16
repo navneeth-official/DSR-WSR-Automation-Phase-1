@@ -22,6 +22,7 @@ from app.services.ppt_shape_utils import (
     service_suffix_from_title,
     slide_title_text,
 )
+from app.services.template_block_spec import TemplateBlockSpec, extract_block_spec_from_cell
 
 CATEGORY_PATTERNS: dict[str, tuple[str, ...]] = {
     "completed": ("completed this week",),
@@ -54,6 +55,7 @@ class ServiceProfile:
     ka_mode: str = "none"  # none | standalone | embedded
     ka_embedded_start_row: int | None = None
     hl_row_count: int = 3
+    block_spec: TemplateBlockSpec | None = None
 
 
 @dataclass
@@ -229,6 +231,7 @@ def scan_template_profile(template_path: Path | str) -> TemplateProfile:
             ka_mode=ka_mode,
             ka_embedded_start_row=ka_row,
             hl_row_count=len(hl.table.rows),
+            block_spec=extract_block_spec_from_cell(cell),
         )
 
     return profile

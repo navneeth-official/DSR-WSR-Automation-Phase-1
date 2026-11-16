@@ -240,9 +240,6 @@ def fit_hl_only_on_slide(slide, layout_profile: dict | None = None) -> int:
     layout_profile.setdefault("canonical_para_count", layout_profile["ref_para_count"])
     max_h = int(MAX_KA_BOTTOM_EMU - layout_profile["ref_hl"].top - MIN_HL_BOTTOM_PAD_EMU)
     height = fit_hl_to_content(hl, layout_profile, max_h=max_h)
-    from app.wsr_engine.formatter import top_align_highlights_on_slide
-
-    top_align_highlights_on_slide(slide)
     return height
 
 

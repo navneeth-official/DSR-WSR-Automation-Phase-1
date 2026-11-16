@@ -32,6 +32,8 @@ def _normalize_section(section: dict, report_end: date | None) -> SprintSection:
         completed=list(section.get("completed", [])),
         released=list(section.get("released", [])),
         inprogress=list(section.get("inprogress", [])),
+        sprint_start_date=section.get("sprint_start_date"),
+        sprint_end_date=section.get("sprint_end_date"),
     )
 
 

@@ -55,7 +55,6 @@ def replace_ka_bullet_block(txBody, first_index: int, last_index: int, items: li
     for text in items:
         new_p = copy.deepcopy(template_p)
         _set_single_run_text(new_p, text)
-        normalize_ka_bullet_template(new_p)
         new_paragraphs.append(new_p)
 
     prev = anchor
