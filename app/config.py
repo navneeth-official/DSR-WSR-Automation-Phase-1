@@ -1,14 +1,91 @@
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from urllib.parse import quote_plus, urlparse, urlunparse
 
 from dotenv import load_dotenv
 
-load_dotenv()
+from app.paths import REPO_ROOT
+
+BACKEND_ENV = (
+    REPO_ROOT / "DSR_WSR_AUTOMATION-Backend" / "backend" / "Jira-Automation" / ".env"
+)
+
+_env_loaded = False
 
 
 def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
+
+
+def load_app_env() -> None:
+    """Load repo .env, then backend Jira-Automation .env for unset keys."""
+    global _env_loaded
+    if _env_loaded:
+        return
+    load_dotenv(REPO_ROOT / ".env")
+    # Backend holds canonical DB credentials when repo root has no .env.
+    load_dotenv(BACKEND_ENV, override=False)
+    _env_loaded = True
+
+
+def normalize_database_url(url: str) -> str:
+    """Use psycopg2 (requirements.txt); SQLAlchemy 2.1+ defaults to psycopg v3 for postgresql://."""
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + url[len("postgresql://") :]
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg2://" + url[len("postgres://") :]
+    return url
+
+
+def resolve_database_url() -> str:
+    """
+    Build a SQLAlchemy URL from DATABASE_URL and/or POSTGRES_*.
+
+    Fills a missing URL password from POSTGRES_PASSWORD (common when a shell
+    DATABASE_URL has user/host only). URL-encodes the password for special chars.
+    """
+    load_app_env()
+    user = _env("POSTGRES_USER", "postgres")
+    password = _env("POSTGRES_PASSWORD", "postgres")
+    host = _env("POSTGRES_HOST", "localhost")
+    port = _env("POSTGRES_PORT", "5432")
+    database = _env("POSTGRES_DB", "dsr_wsr_db")
+
+    url = _env("DATABASE_URL")
+    if not url:
+        safe_password = quote_plus(password) if password else ""
+        auth = f"{quote_plus(user)}:{safe_password}" if safe_password else quote_plus(user)
+        url = f"postgresql://{auth}@{host}:{port}/{database}"
+        return normalize_database_url(url)
+
+    parsed = urlparse(url)
+    scheme = parsed.scheme.replace("+psycopg2", "").replace("+psycopg", "")
+    if scheme not in ("postgresql", "postgres"):
+        return normalize_database_url(url)
+
+    needs_password = not parsed.password and bool(password)
+    if needs_password:
+        hostname = parsed.hostname or host
+        netloc_host = hostname
+        parsed_port = parsed.port or (int(port) if port.isdigit() else None)
+        if parsed_port:
+            netloc_host = f"{netloc_host}:{parsed_port}"
+        username = parsed.username or user
+        netloc = f"{quote_plus(username)}:{quote_plus(password)}@{netloc_host}"
+        path = parsed.path or f"/{database}"
+        url = urlunparse(
+            (
+                "postgresql",
+                netloc,
+                path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+    return normalize_database_url(url)
 
 
 @dataclass(frozen=True)
@@ -52,11 +129,9 @@ class Settings:
 
 
 def _settings_from_env() -> Settings:
+    load_app_env()
     return Settings(
-        database_url=_env(
-            "DATABASE_URL",
-            "postgresql://postgres:postgres@localhost:5432/dsr_wsr_db",
-        ),
+        database_url=resolve_database_url(),
         postgres_user=_env("POSTGRES_USER", "postgres"),
         postgres_password=_env("POSTGRES_PASSWORD", "postgres"),
         postgres_host=_env("POSTGRES_HOST", "localhost"),
@@ -99,3 +174,6 @@ def llm_configured(settings: Settings | None = None) -> bool:
     if provider is None:
         return False
     return provider_configured(provider, s)
+
+
+load_app_env()

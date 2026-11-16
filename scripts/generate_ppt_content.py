@@ -33,11 +33,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from dotenv import load_dotenv
-
-load_dotenv(_REPO_ROOT / ".env")
-
+from app.config import load_app_env
 from app.database import SessionLocal
+
+load_app_env()
 from app.services.ppt_content_builder import build_ppt_content
 from app.services.ppt_content_preview import format_content_preview
 

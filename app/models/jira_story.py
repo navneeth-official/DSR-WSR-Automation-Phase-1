@@ -10,6 +10,7 @@ from app.database import Base
 if TYPE_CHECKING:
     from app.models.project import Project
     from app.models.sprint import Sprint
+    from app.models.story_status import StoryStatus
 
 
 class JiraStory(Base):
@@ -28,6 +29,11 @@ class JiraStory(Base):
         nullable=True,
         index=True,
     )
+    status_id: Mapped[int] = mapped_column(
+        ForeignKey("story_statuses.status_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
     title: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
@@ -39,7 +45,6 @@ class JiraStory(Base):
         Numeric(5, 2),
         nullable=True,
     )
-    status: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     assignee: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     reporter: Mapped[str | None] = mapped_column(String(200), nullable=True)
     issue_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -67,6 +72,14 @@ class JiraStory(Base):
 
     project: Mapped["Project"] = relationship(back_populates="stories")
     sprint: Mapped["Sprint | None"] = relationship(back_populates="stories")
+    story_status: Mapped["StoryStatus"] = relationship(back_populates="stories")
+
+    @property
+    def status(self) -> str:
+        """Jira workflow status label (from story_statuses.status_name)."""
+        if self.story_status is not None:
+            return self.story_status.status_name
+        return ""
 
     def __repr__(self) -> str:
         return f"<JiraStory(jira_key={self.jira_key!r}, status={self.status!r})>"

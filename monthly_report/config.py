@@ -35,15 +35,10 @@ def _repo_path(value: str | Path) -> Path:
 
 
 def database_url() -> str:
-    url = _env("DATABASE_URL")
-    if not url:
-        user = _env("POSTGRES_USER") or "postgres"
-        password = _env("POSTGRES_PASSWORD")
-        host = _env("POSTGRES_HOST") or "localhost"
-        port = _env("POSTGRES_PORT") or "5432"
-        db = _env("POSTGRES_DB") or "dsr_wsr_db"
-        if password:
-            url = f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    from app.config import load_app_env, resolve_database_url
+
+    load_app_env()
+    url = resolve_database_url()
     if not url:
         raise RuntimeError(
             "DATABASE_URL is not set. Add REPO_ROOT/.env, or configure "

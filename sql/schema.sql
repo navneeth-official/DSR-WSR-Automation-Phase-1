@@ -11,6 +11,13 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE INDEX IF NOT EXISTS ix_projects_project_key ON projects (project_key);
 
+CREATE TABLE IF NOT EXISTS story_statuses (
+    status_id       SERIAL        PRIMARY KEY,
+    status_name     VARCHAR(100)  NOT NULL UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS ix_story_statuses_status_name ON story_statuses (status_name);
+
 CREATE TABLE IF NOT EXISTS sprints (
     sprint_id           SERIAL        PRIMARY KEY,
     sprint_name         VARCHAR(200)  NOT NULL UNIQUE,
@@ -32,7 +39,7 @@ CREATE TABLE IF NOT EXISTS jira_stories (
     summary             VARCHAR(500)  NOT NULL,
     description         TEXT,
     story_points        NUMERIC(5, 2),
-    status              VARCHAR(100)  NOT NULL,
+    status_id           INTEGER       NOT NULL REFERENCES story_statuses (status_id) ON DELETE RESTRICT,
     assignee            VARCHAR(200),
     reporter            VARCHAR(200),
     issue_type          VARCHAR(100),
@@ -49,7 +56,7 @@ CREATE TABLE IF NOT EXISTS jira_stories (
 CREATE INDEX IF NOT EXISTS ix_jira_stories_project_id ON jira_stories (project_id);
 CREATE INDEX IF NOT EXISTS ix_jira_stories_sprint_id  ON jira_stories (sprint_id);
 CREATE INDEX IF NOT EXISTS ix_jira_stories_assignee   ON jira_stories (assignee);
-CREATE INDEX IF NOT EXISTS ix_jira_stories_status     ON jira_stories (status);
+CREATE INDEX IF NOT EXISTS ix_jira_stories_status_id  ON jira_stories (status_id);
 
 COMMENT ON TABLE projects IS 'Lookup table: one row per Jira project_key';
 COMMENT ON TABLE sprints IS 'Lookup table: one row per unique sprint name';

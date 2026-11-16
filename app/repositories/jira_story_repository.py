@@ -9,6 +9,7 @@ from app.models.project import Project
 from app.models.sprint import Sprint
 from app.repositories.project_repository import ProjectRepository
 from app.repositories.sprint_repository import SprintRepository
+from app.repositories.story_status_repository import StoryStatusRepository
 from app.services.wsr_story_selection import select_wsr_story_snapshots
 
 
@@ -19,11 +20,20 @@ class JiraStoryRepository:
         self.db = db
         self._projects = ProjectRepository(db)
         self._sprints = SprintRepository(db)
+        self._statuses = StoryStatusRepository(db)
+
+    @staticmethod
+    def _story_load_options():
+        return (
+            joinedload(JiraStory.project),
+            joinedload(JiraStory.sprint),
+            joinedload(JiraStory.story_status),
+        )
 
     def get_by_key(self, jira_key: str) -> JiraStory | None:
         stmt = (
             select(JiraStory)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .where(JiraStory.jira_key == jira_key)
         )
         return self.db.scalars(stmt).first()
@@ -31,7 +41,7 @@ class JiraStoryRepository:
     def get_all(self) -> list[JiraStory]:
         stmt = (
             select(JiraStory)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .order_by(JiraStory.created_date.desc())
         )
         return list(self.db.scalars(stmt).unique().all())
@@ -39,7 +49,7 @@ class JiraStoryRepository:
     def get_by_project_id(self, project_id: int) -> list[JiraStory]:
         stmt = (
             select(JiraStory)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .where(JiraStory.project_id == project_id)
             .order_by(JiraStory.created_date.desc())
         )
@@ -49,7 +59,7 @@ class JiraStoryRepository:
         stmt = (
             select(JiraStory)
             .join(Project)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .where(Project.project_key == project_key)
             .order_by(JiraStory.created_date.desc())
         )
@@ -58,7 +68,7 @@ class JiraStoryRepository:
     def get_by_sprint_id(self, sprint_id: int) -> list[JiraStory]:
         stmt = (
             select(JiraStory)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .where(JiraStory.sprint_id == sprint_id)
             .order_by(JiraStory.jira_key)
         )
@@ -67,7 +77,7 @@ class JiraStoryRepository:
     def get_by_assignee(self, assignee: str) -> list[JiraStory]:
         stmt = (
             select(JiraStory)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .where(JiraStory.assignee == assignee)
             .order_by(JiraStory.created_date.desc())
         )
@@ -82,7 +92,7 @@ class JiraStoryRepository:
         """Stories for a WSR snapshot week with project and sprint loaded."""
         stmt = (
             select(JiraStory)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .where(JiraStory.snapshot_date == snapshot_date)
             .order_by(
                 JiraStory.project_id,
@@ -114,7 +124,7 @@ class JiraStoryRepository:
         stmt = (
             select(JiraStory)
             .join(Sprint, JiraStory.sprint_id == Sprint.sprint_id)
-            .options(joinedload(JiraStory.project), joinedload(JiraStory.sprint))
+            .options(*JiraStoryRepository._story_load_options())
             .where(sprint_eligible)
             .order_by(
                 JiraStory.project_id,
@@ -159,6 +169,7 @@ class JiraStoryRepository:
             sprint_start_date=sprint_start_date,
             sprint_end_date=sprint_end_date,
         )
+        status_row = self._statuses.get_or_create(status_name=status)
 
         story = self.db.get(JiraStory, jira_key)
 
@@ -167,13 +178,13 @@ class JiraStoryRepository:
                 jira_key=jira_key,
                 project_id=project.project_id,
                 sprint_id=sprint.sprint_id if sprint else None,
+                status_id=status_row.status_id,
                 summary=summary,
                 description=description,
                 issue_type=issue_type,
                 priority=priority,
                 assignee=assignee,
                 reporter=reporter,
-                status=status,
                 story_points=_to_decimal(story_points),
                 created_date=created_date,
                 updated_date=updated_date,
@@ -194,7 +205,7 @@ class JiraStoryRepository:
             story.priority = priority
             story.assignee = assignee
             story.reporter = reporter
-            story.status = status
+            story.status_id = status_row.status_id
             story.story_points = _to_decimal(story_points)
             story.created_date = created_date
             story.updated_date = updated_date
