@@ -172,6 +172,8 @@ class PptWriter:
         content_labels: dict[str, str] | None = None,
     ) -> int:
         assert self.prs is not None
+        # Placeholder-authored index only. Static HEB index labels must never be
+        # patched in place — that skips rebuild and leaves wrong numbers/links.
         updated = fill_index_slide_track_placeholders(
             self.prs,
             projects,
@@ -180,13 +182,16 @@ class PptWriter:
         )
         if updated:
             return updated
-        if skeleton_mode:
-            return rebuild_index_from_projects(
-                self.prs,
-                projects,
-                content_labels,
-                self.template_model.index_layout,
-            )
+        # Rebuild from the actual delivery set (correct numbers + hyperlinks).
+        # Reflow is a last resort for fixed multi-track templates without layout.
+        rebuilt = rebuild_index_from_projects(
+            self.prs,
+            projects,
+            content_labels,
+            self.template_model.index_layout,
+        )
+        if rebuilt or skeleton_mode:
+            return rebuilt
         return reflow_index_slide(self.prs, projects)
 
     def save(self, output_path: Path | str) -> Path:

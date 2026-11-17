@@ -200,16 +200,35 @@ def _resolve_index_target(
     # Skip non-delivery index rows (team allocation, RAID, etc.)
     if "team allocation" in label or "raid status" in label:
         return None
+    if "matters of attention" in label:
+        return _find_static_slide_index(prs, "Matters of Attention")
+
+    # Prefer explicit INDEX_ENTRY_RULES needles over loose fuzzy "core service" matches.
+    for needles, search_title, is_delivery in INDEX_ENTRY_RULES:
+        if not is_delivery:
+            continue
+        if not all(needle in label for needle in needles):
+            continue
+        matched = _match_project_for_index(projects, search_title)
+        if matched is not None and matched.main_slide_index < len(prs.slides):
+            return matched.main_slide_index
+        return None
 
     best_score = 0
     best_idx: int | None = None
+    tied = False
 
     for proj in projects:
-        score = fuzz.partial_ratio(label, proj.project_name.lower())
-        if score > best_score and score >= 70:
+        score = int(fuzz.token_set_ratio(label, proj.project_name.lower()))
+        if score > best_score and score >= 90:
             best_score = score
             best_idx = proj.main_slide_index
+            tied = False
+        elif score == best_score and score >= 90 and best_idx != proj.main_slide_index:
+            tied = True
 
+    if tied:
+        return None
     if best_idx is not None and best_idx < len(prs.slides):
         return best_idx
 
@@ -217,12 +236,15 @@ def _resolve_index_target(
         title = normalize_title_text(slide_title_text(slide)).lower()
         if not title or "(contd" in title:
             continue
-        score = fuzz.partial_ratio(label, title)
-        if score > best_score and score >= 70:
+        score = int(fuzz.token_set_ratio(label, title))
+        if score > best_score and score >= 90:
             best_score = score
             best_idx = i
+            tied = False
+        elif score == best_score and score >= 90 and best_idx != i:
+            tied = True
 
-    return best_idx
+    return None if tied else best_idx
 
 
 def _collect_active_index_entries(prs: Presentation, table, projects: list[ProjectMap]) -> list[tuple[int, object]]:
@@ -452,9 +474,17 @@ def _cell_has_track_name_placeholder(cell) -> bool:
     for p_elem in tx_body.findall(qn("a:p")):
         text = paragraph_text(p_elem)
         for raw in find_placeholder_tokens(text):
-            if normalize_token_name(raw) == "track_name":
+            if normalize_token_name(raw) in {"track_name", "slide_number"}:
                 return True
     return False
+
+
+def index_table_has_track_placeholders(table) -> bool:
+    """True only when the index is authored with ``{Track Name}`` / ``{Slide Number}``."""
+    return any(
+        _cell_has_track_name_placeholder(cell)
+        for cell in _index_table_cells_row_major(table)
+    )
 
 
 def fill_index_slide_track_placeholders(
@@ -466,9 +496,10 @@ def fill_index_slide_track_placeholders(
     """
     Fill index cells that use ``{Track Name}`` / ``{Slide Number}`` placeholders.
 
-    Cells are paired with delivery tracks in ``main_slide_index`` order. Each
-    cell is updated in place (no clear/repack); hyperlinks target the track's
-    main delivery slide.
+    Static-label templates (no placeholders) must return 0 so callers fall through
+    to ``rebuild_index_from_projects`` / ``reflow_index_slide``. Updating static
+    cells in place leaves unmatched template tracks and can fuzzy-link them to the
+    wrong delivery slide.
     """
     index_idx = _find_index_slide_index(prs)
     if index_idx is None:
@@ -481,6 +512,12 @@ def fill_index_slide_track_placeholders(
         logger.warning("Index table not found")
         return 0
 
+    if not index_table_has_track_placeholders(table):
+        logger.info(
+            "Index has no {Track Name}/{Slide Number} placeholders — deferring to rebuild/reflow"
+        )
+        return 0
+
     labels = content_labels or {}
     if layout is None or not layout.slots:
         layout = discover_index_layout(table)
@@ -491,7 +528,7 @@ def fill_index_slide_track_placeholders(
     if delivery_slots:
         for slot in delivery_slots:
             cell = _index_cell_at(table, slot.row, slot.col)
-            if cell is None or not _cell_has_index_content(cell):
+            if cell is None or not _cell_has_track_name_placeholder(cell):
                 continue
             project = _match_project_for_index(projects, slot.search_title)
             if project is None:
@@ -505,8 +542,8 @@ def fill_index_slide_track_placeholders(
                 track_name=display,
                 slide_number=f"{project.main_slide_index + 1:02d}",
             )
-            if _cell_has_track_name_placeholder(cell):
-                substitute_placeholders_in_shape_text_frame(cell, ctx)
+            if substitute_placeholders_in_shape_text_frame(cell, ctx):
+                updated += 1
             if _update_cell_index_entry(cell, index_slide, project.main_slide_index, prs):
                 updated += 1
             linked.add(_cell_identity(cell))
@@ -534,18 +571,29 @@ def fill_index_slide_track_placeholders(
                 len(track_cells),
                 len(projects_sorted),
             )
-    for cell in _index_table_cells_row_major(table):
-        if _cell_identity(cell) in linked:
+
+    # Static rows (Matters of Attention / Team Allocation) — never fuzzy-map leftovers.
+    for slot in layout.slots:
+        if slot.is_delivery:
             continue
-        if not _cell_has_index_content(cell):
+        cell = _index_cell_at(table, slot.row, slot.col)
+        if cell is None or _cell_identity(cell) in linked:
             continue
-        if _cell_has_track_name_placeholder(cell):
-            continue
-        target = _resolve_index_target(prs, _cell_text_blob(cell), projects)
+        target = _find_static_slide_index(prs, slot.search_title)
         if target is None:
             continue
+        display = slot.search_title
+        if _cell_has_track_name_placeholder(cell):
+            substitute_placeholders_in_shape_text_frame(
+                cell,
+                PlaceholderContext(
+                    track_name=display,
+                    slide_number=f"{target + 1:02d}",
+                ),
+            )
         if _update_cell_index_entry(cell, index_slide, target, prs):
             updated += 1
+        linked.add(_cell_identity(cell))
 
     if linked:
         logger.info(
